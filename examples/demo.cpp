@@ -205,8 +205,14 @@ int main() {
             }
         }
 
-        // No artificial frame limiter — synchronized output (\e[?2026h/l)
-        // lets the terminal handle pacing. This maximizes responsiveness.
+        // Cap at ~60fps to avoid saturating the PTY buffer.
+        // Without this, write() blocks when the kernel buffer fills and input starves.
+        auto elapsed = Clock::now() - frame_start;
+        auto target = std::chrono::microseconds(16000);
+        if (elapsed < target) {
+            usleep(static_cast<useconds_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(target - elapsed).count()));
+        }
     }
 
     term_shutdown();
