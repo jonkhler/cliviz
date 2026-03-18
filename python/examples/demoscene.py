@@ -178,30 +178,28 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
         # Check if we're near the first blob
         bp0 = ti.math.vec3(ti.sin(t * 0.7) * 1.0, ti.cos(t * 0.5) * 0.7, ti.sin(t * 0.3) * 0.8)
         dist_to_blob0 = (pos - bp0).norm()
-        glass_amount = ti.math.clamp(1.0 - dist_to_blob0 * 1.5, 0.0, 1.0) * is_blob
+        # Generous radius — the blob surface is at ~0.5 from center
+        glass_amount = ti.math.clamp(1.0 - (dist_to_blob0 - 0.3) * 3.0, 0.0, 1.0) * is_blob
 
         # Fresnel — more reflective at glancing angles
         fresnel = ti.pow(1.0 - ti.max(ti.math.dot(n, -rd), 0.0), 4.0)
         fresnel = 0.1 + 0.9 * fresnel
 
-        # Refracted ray — trace through the glass blob
+        # Refracted ray — trace through glass, hit the floor
         refr_col = bg_col
         if glass_amount > 0.1:
             refr_rd = refract_ray(rd, n, 1.0 / 1.45)
-            # March the refracted ray
-            refr_t = 0.1
-            for _ in range(30):
-                rp = pos + refr_rd * refr_t
-                rd2 = sdf_meta_scene(rp, t)
-                if rd2 < 0.01:
-                    # Hit something through the glass
-                    rn = meta_normal(rp, t)
-                    rdiff = ti.max(ti.math.dot(rn, light), 0.0)
-                    refr_col = floor_mat * (rdiff * 0.5 + 0.2)
-                    break
-                refr_t += ti.max(rd2, 0.05)
-                if refr_t > 8.0:
-                    break
+            # Approximate: skip blob interior, march to floor only
+            # Floor is at y = -1.5, so compute where refracted ray hits it
+            floor_t = (-1.5 - pos.y) / (refr_rd.y - 0.0001)  # avoid div by 0
+            if floor_t > 0.0:
+                floor_pos = pos + refr_rd * floor_t
+                fcheck = ti.math.mod(ti.floor(floor_pos.x * 2.0) + ti.floor(floor_pos.z * 2.0), 2.0)
+                if fcheck < 0.0:
+                    fcheck += 2.0
+                # Distorted checkerboard through glass — tinted blue-green
+                refr_col = ti.math.vec3(0.1, 0.15, 0.2) * (1.0 - fcheck * 0.3) + ti.math.vec3(0.2, 0.25, 0.3) * (fcheck * 0.3)
+                refr_col += ti.math.vec3(0.05, 0.1, 0.15)  # glass tint
 
         # Combine: glass blob uses fresnel blend of reflection + refraction
         opaque_col = blob_mat * (diff * 0.6 + 0.15)
