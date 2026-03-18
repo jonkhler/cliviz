@@ -1,8 +1,9 @@
 build/
 CMakeUserPresets.json
+.venv/
 python/.venv/
 python/build/
-python/*.egg-info/
+*.egg-info/
 __pycache__/
 .pytest_cache/
 frame_dump.bin
