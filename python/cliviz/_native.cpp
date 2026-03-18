@@ -87,12 +87,19 @@ struct PyPixelBuffer {
         return n;
     }
 
-    uint32_t flush_full() {
-        inner->encode_all();
+    void encode() { inner->encode(); }
+    void encode_all() { inner->encode_all(); }
+
+    uint32_t present() {
         g_outbuf.clear();
         uint32_t n = inner->fb->flush(g_outbuf);
         g_outbuf.flush();
         return n;
+    }
+
+    uint32_t flush_full() {
+        inner->encode_all();
+        return present();
     }
 };
 
@@ -127,6 +134,9 @@ NB_MODULE(_native, mod) {
         .def("clear", &PyPixelBuffer::clear, "r"_a, "g"_a, "b"_a)
         .def("fill_rect", &PyPixelBuffer::fill_rect,
              "x0"_a, "y0"_a, "x1"_a, "y1"_a, "r"_a, "g"_a, "b"_a)
+        .def("encode", &PyPixelBuffer::encode, "Encode dirty pixel pairs into cells")
+        .def("encode_all", &PyPixelBuffer::encode_all, "Encode all pixel pairs into cells")
+        .def("present", &PyPixelBuffer::present, "Diff + write to terminal (call after encode + draw_text)")
         .def("flush", &PyPixelBuffer::flush, "Encode dirty cells and write to terminal")
         .def("flush_full", &PyPixelBuffer::flush_full, "Encode all cells and write to terminal")
         .def("draw_text", [](PyPixelBuffer& self, uint32_t col, uint32_t row,

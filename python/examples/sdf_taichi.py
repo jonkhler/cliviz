@@ -222,11 +222,11 @@ def main() -> None:
             # GPU renders directly into the pixel buffer's numpy array
             render(pixels, pb.width, pb.height, t, eye_x, eye_y, eye_z)
 
-            # HUD overlay — rendered as terminal text on top of pixels
+            # encode pixels → draw text overlay → present to terminal
+            pb.encode_all()
             fps = 1.0 / dt if dt > 0 else 0
-            pb.draw_text(1, 0, f"{fps:.0f}fps", 255, 255, 255, 30, 30, 30)
-
-            pb.flush_full()
+            pb.draw_text(1, 0, f"{fps:.0f}fps   ", 255, 255, 255, 30, 30, 30)
+            pb.present()
 
             time.sleep(max(0, 0.016 - (time.monotonic() - now)))
 
