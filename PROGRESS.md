@@ -2,7 +2,8 @@
 
 ## Current state
 
-Terminal 3D rendering engine in C++20. Stages 0, 1, 3, 5 complete.
+Terminal 3D rendering engine in C++20. Stages 0, 1, 3, 5, 6.1, 6.3 complete.
+85 tests, all passing.
 
 ### Implemented stages
 
@@ -20,38 +21,48 @@ dirty propagation from pixel to cell level, encode only dirty regions.
 triangle rasterizer with backface culling, z-buffer, flat shading. Procedural cube
 and icosphere generators. Interactive demo with orbit camera.
 
+**Stage 6.1 — Gouraud Shading**: Per-vertex normal interpolation, directional light
+with ambient term, smooth color gradients on the icosphere.
+
 **Stage 6.3 — SDF Raymarcher**: Per-pixel signed distance field raymarcher with
 smooth union CSG, diffuse lighting, shadow rays, ambient occlusion, distance fog,
-checkerboard floor. Available as render mode '3' in the demo.
+checkerboard floor.
 
 ### Build & run
 ```
 conan install . --output-folder=build --build=missing -s compiler.cppstd=20
 cmake --preset conan-release
 cmake --build build
-./build/cliviz              # interactive demo
-ctest --test-dir build      # 76 tests
+./build/cliviz              # interactive demo (1:cube 2:sphere 3:sdf)
+ctest --test-dir build      # 85 tests
 ```
+
+### Controls
+- WASD / arrow keys: orbit camera
+- +/-: zoom in/out
+- 1: cube (flat shading), 2: sphere (Gouraud), 3: SDF raymarcher
+- Space: toggle auto-rotation
+- q: quit
 
 ### Architecture
 ```
 src/
-  outbuf.h        — output buffer + ANSI escape helpers (header-only)
-  cell.h          — 8-byte Cell struct + glyph table (header-only)
-  math3d.h        — vec3/vec4/mat4 linear algebra (header-only)
+  outbuf.h        — 256KB output buffer + ANSI escape helpers
+  cell.h          — 8-byte Cell struct + glyph table
+  math3d.h        — vec3/vec4/mat4 linear algebra
   term.h/.cpp     — terminal raw mode, setup/teardown
   framebuf.h/.cpp — double-buffered cell framebuffer, diff engine
   pixbuf.h/.cpp   — pixel buffer, half-block encode
-  raster.h/.cpp   — triangle rasterizer, z-buffer, mesh generators
-  main.cpp        — spinning cube/sphere demo
-tests/
+  raster.h/.cpp   — triangle rasterizer, z-buffer, Gouraud, mesh generators
   sdf.h/.cpp      — SDF raymarcher with lighting
-  8 test files, 84 tests total
+  main.cpp        — interactive demo
+tests/
+  8 test files, 85 tests
 ```
 
 ## Next (plan.md stages not yet done)
 
 - **Stage 2**: SIMD optimization (NEON on ARM, not AVX2)
 - **Stage 4**: Multi-core parallelism (thread pool, row-band partitioning)
-- **Stage 6 remaining**: Gouraud shading, textures, color quantization,
-  adaptive quality, mouse input, resize handling
+- **Stage 6 remaining**: Textures, color quantization, adaptive quality,
+  mouse input, resize handling
