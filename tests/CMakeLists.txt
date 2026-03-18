@@ -4,8 +4,10 @@ add_executable(cliviz_tests
     term_test.cpp
     cell_test.cpp
     framebuf_test.cpp
+    pixbuf_test.cpp
     ${CMAKE_SOURCE_DIR}/src/term.cpp
     ${CMAKE_SOURCE_DIR}/src/framebuf.cpp
+    ${CMAKE_SOURCE_DIR}/src/pixbuf.cpp
 )
 
 target_include_directories(cliviz_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
