@@ -8,9 +8,10 @@ add_executable(cliviz_tests
     raster_test.cpp
     sdf_test.cpp
     threadpool_test.cpp
+    capi_test.cpp
 )
 
-target_link_libraries(cliviz_tests PRIVATE cliviz_lib GTest::gtest_main)
+target_link_libraries(cliviz_tests PRIVATE cliviz_static GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(cliviz_tests)
