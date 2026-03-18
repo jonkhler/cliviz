@@ -2,22 +2,21 @@
 
 #include <cstdint>
 #include <functional>
-#include <mutex>
 #include <thread>
 #include <vector>
-#include <condition_variable>
-#include <atomic>
 
 namespace cliviz {
 
-// Simple fork-join thread pool for parallel row-band processing.
-// Workers are created once and reused across frames.
+// Fork-join parallelism for row-band processing.
+// Spawns threads per call (no persistent worker pool — avoids deadlock
+// complexity; thread creation cost is negligible vs. per-frame render work).
 class ThreadPool {
 public:
     explicit ThreadPool(uint32_t num_threads = 0);
     ~ThreadPool();
 
-    // Execute `fn(thread_id, num_threads)` on each worker, wait for all to finish.
+    // Execute `fn(thread_id, num_threads)` on each thread, wait for all to finish.
+    // One chunk runs on the calling thread; N-1 threads are spawned.
     void parallel_for(std::function<void(uint32_t, uint32_t)> fn);
 
     uint32_t thread_count() const { return n_threads; }
@@ -27,16 +26,6 @@ public:
 
 private:
     uint32_t n_threads;
-    std::vector<std::thread> workers;
-    std::function<void(uint32_t, uint32_t)> task;
-    std::mutex mtx;
-    std::condition_variable cv_start;
-    std::condition_variable cv_done;
-    std::atomic<uint32_t> pending{0};
-    bool stop = false;
-    uint64_t generation = 0;
-
-    void worker_loop(uint32_t id);
 };
 
 } // namespace cliviz
