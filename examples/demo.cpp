@@ -189,9 +189,11 @@ int main() {
                 " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit ",
                 mode_name, tris_drawn, cells_emitted, frame_ms, fps);
         }
-        // Pad to terminal width
-        for (int i = n; i < ts.cols; ++i) status[i] = ' ';
-        outbuf.append(status, static_cast<uint32_t>(std::min(static_cast<int>(ts.cols), static_cast<int>(sizeof(status)))));
+        // Pad to terminal width - 1 to avoid triggering auto-wrap scroll
+        int pad_to = ts.cols - 1;
+        for (int i = n; i < pad_to; ++i) status[i] = ' ';
+        int status_len = std::max(n, pad_to);
+        outbuf.append(status, static_cast<uint32_t>(std::min(status_len, static_cast<int>(sizeof(status)))));
         outbuf.append("\x1b[0m", 4); // reset
 
         outbuf.flush();
