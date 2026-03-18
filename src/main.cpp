@@ -35,6 +35,8 @@ struct Camera {
 };
 
 // Non-blocking stdin read. Returns 0 if no input available.
+// Uses a short timeout for escape sequence continuation bytes
+// to distinguish bare ESC from arrow keys (ESC [ A/B/C/D).
 int read_key() {
     struct pollfd pfd{STDIN_FILENO, POLLIN, 0};
     if (poll(&pfd, 1, 0) <= 0) return 0;
@@ -42,19 +44,21 @@ int read_key() {
     if (read(STDIN_FILENO, &c, 1) != 1) return 0;
 
     if (c == '\x1b') {
-        // Escape sequence
+        // Wait up to 30ms for escape sequence continuation
+        struct pollfd esc_pfd{STDIN_FILENO, POLLIN, 0};
+        if (poll(&esc_pfd, 1, 30) <= 0) return 0; // bare ESC → ignore
         char seq[2]{};
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
-        if (seq[0] == '[') {
-            switch (seq[1]) {
-            case 'A': return 'k'; // up
-            case 'B': return 'j'; // down
-            case 'C': return 'l'; // right
-            case 'D': return 'h'; // left
-            }
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) return 0;
+        if (seq[0] != '[') return 0;
+        if (poll(&esc_pfd, 1, 30) <= 0) return 0;
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) return 0;
+        switch (seq[1]) {
+        case 'A': return 'k'; // up
+        case 'B': return 'j'; // down
+        case 'C': return 'l'; // right
+        case 'D': return 'h'; // left
         }
-        return '\x1b';
+        return 0;
     }
     return c;
 }
@@ -104,21 +108,22 @@ int main() {
         float dt = std::chrono::duration<float>(frame_start - last_frame).count();
         last_frame = frame_start;
 
-        // Input
-        int key = read_key();
-        switch (key) {
-        case 'q': case '\x1b': running = false; break;
-        case 'h': case 'a': cam.yaw -= 0.1f; break;
-        case 'l': case 'd': cam.yaw += 0.1f; break;
-        case 'k': case 'w': cam.pitch += 0.05f; break;
-        case 'j': case 's': cam.pitch -= 0.05f; break;
-        case '+': case '=': cam.distance = std::max(1.5f, cam.distance - 0.3f); break;
-        case '-': cam.distance = std::min(20.0f, cam.distance + 0.3f); break;
-        case ' ': auto_rotate = !auto_rotate; break;
-        case '1': active_mesh = &cube; mode = Mode::Raster; break;
-        case '2': active_mesh = &sphere; mode = Mode::Raster; break;
-        case '3': mode = Mode::SDF; break;
-        default: break;
+        // Input — drain all pending keys
+        for (int key = read_key(); key != 0; key = read_key()) {
+            switch (key) {
+            case 'q': running = false; break;
+            case 'h': case 'a': cam.yaw -= 0.1f; break;
+            case 'l': case 'd': cam.yaw += 0.1f; break;
+            case 'k': case 'w': cam.pitch += 0.05f; break;
+            case 'j': case 's': cam.pitch -= 0.05f; break;
+            case '+': case '=': cam.distance = std::max(1.5f, cam.distance - 0.3f); break;
+            case '-': cam.distance = std::min(20.0f, cam.distance + 0.3f); break;
+            case ' ': auto_rotate = !auto_rotate; break;
+            case '1': active_mesh = &cube; mode = Mode::Raster; break;
+            case '2': active_mesh = &sphere; mode = Mode::Raster; break;
+            case '3': mode = Mode::SDF; break;
+            default: break;
+            }
         }
 
         cam.pitch = std::clamp(cam.pitch, -1.4f, 1.4f);
