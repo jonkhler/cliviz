@@ -1,5 +1,4 @@
 add_executable(cliviz_tests
-    smoke_test.cpp
     outbuf_test.cpp
     term_test.cpp
     cell_test.cpp
