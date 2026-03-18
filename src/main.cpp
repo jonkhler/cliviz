@@ -92,6 +92,7 @@ int main() {
     float angle = 0.0f;
     bool auto_rotate = true;
     bool running = true;
+    int sdf_quality = 80; // adaptive: 80 (full), 40 (fast), 20 (ultra-fast)
 
     auto last_frame = Clock::now();
 
@@ -144,7 +145,7 @@ int main() {
             float cx = std::cos(cam.pitch), sx = std::sin(cam.pitch);
             float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
             vec3 eye{cam.distance * cx * sy, cam.distance * sx, cam.distance * cx * cy};
-            sdf_render_parallel(*pb, sdf_scene_default, angle, eye, {0, 0, 0}, {0, 1, 0}, pool);
+            sdf_render_parallel(*pb, sdf_scene_default, angle, eye, {0, 0, 0}, {0, 1, 0}, pool, sdf_quality);
             pb->encode_all(); // fast path: SDF writes every pixel
         } else {
             pb->clear(15, 15, 25);
@@ -168,15 +169,31 @@ int main() {
         char status[128];
         const char* mode_name = mode == Mode::SDF ? "sdf" :
                                  (active_mesh == &cube ? "cube" : "sphere");
-        int n = std::snprintf(status, sizeof(status),
-            " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD/arrows:cam +-:zoom 1/2/3:mode q:quit ",
-            mode_name, tris_drawn, cells_emitted, frame_ms, fps);
+        int n;
+        if (mode == Mode::SDF) {
+            n = std::snprintf(status, sizeof(status),
+                " %s q:%d | cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit ",
+                mode_name, sdf_quality, cells_emitted, frame_ms, fps);
+        } else {
+            n = std::snprintf(status, sizeof(status),
+                " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit ",
+                mode_name, tris_drawn, cells_emitted, frame_ms, fps);
+        }
         // Pad to terminal width
         for (int i = n; i < ts.cols; ++i) status[i] = ' ';
         outbuf.append(status, static_cast<uint32_t>(std::min(static_cast<int>(ts.cols), static_cast<int>(sizeof(status)))));
         outbuf.append("\x1b[0m", 4); // reset
 
         outbuf.flush();
+
+        // Adaptive quality for SDF mode
+        if (mode == Mode::SDF) {
+            if (frame_ms > 20.0f && sdf_quality > 20) {
+                sdf_quality = std::max(20, sdf_quality - 10);
+            } else if (frame_ms < 12.0f && sdf_quality < 80) {
+                sdf_quality = std::min(80, sdf_quality + 5);
+            }
+        }
 
         // Frame limiter (~60fps)
         auto elapsed = Clock::now() - frame_start;

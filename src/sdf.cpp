@@ -82,6 +82,7 @@ struct RenderParams {
     vec3 eye, fwd, right, cam_up;
     float w, h, aspect;
     vec3 light_dir, light_col, sky_col;
+    int max_steps;
 };
 
 void render_rows(PixelBuffer& pb, const RenderParams& rp,
@@ -95,7 +96,7 @@ void render_rows(PixelBuffer& pb, const RenderParams& rp,
 
             float t_ray = 0.0f;
             bool hit = false;
-            for (int i = 0; i < 80; ++i) {
+            for (int i = 0; i < rp.max_steps; ++i) {
                 vec3 p = rp.eye + rd * t_ray;
                 float d = rp.scene(p, rp.time);
                 if (d < 0.001f) { hit = true; break; }
@@ -160,29 +161,30 @@ void render_rows(PixelBuffer& pb, const RenderParams& rp,
 }
 
 RenderParams make_params(PixelBuffer& pb, SdfFn scene, float time,
-                         vec3 eye, vec3 center, vec3 up) {
+                         vec3 eye, vec3 center, vec3 up, int max_steps) {
     vec3 fwd = normalize(center - eye);
     vec3 right_v = normalize(cross(fwd, up));
     vec3 cam_up = cross(right_v, fwd);
     auto w = static_cast<float>(pb.width);
     auto h = static_cast<float>(pb.height);
     return {scene, time, eye, fwd, right_v, cam_up, w, h, w / h,
-            normalize({-0.5f, 0.8f, 0.6f}), {1.0f, 0.95f, 0.9f}, {0.4f, 0.5f, 0.7f}};
+            normalize({-0.5f, 0.8f, 0.6f}), {1.0f, 0.95f, 0.9f}, {0.4f, 0.5f, 0.7f},
+            max_steps};
 }
 
 } // namespace
 
 void sdf_render(PixelBuffer& pb, SdfFn scene, float time,
                 vec3 eye, vec3 center, vec3 up) {
-    RenderParams rp = make_params(pb, scene, time, eye, center, up);
+    RenderParams rp = make_params(pb, scene, time, eye, center, up, 80);
     render_rows(pb, rp, 0, pb.height);
     pb.fb->mark_all_dirty();
 }
 
 void sdf_render_parallel(PixelBuffer& pb, SdfFn scene, float time,
                          vec3 eye, vec3 center, vec3 up,
-                         ThreadPool& pool) {
-    RenderParams rp = make_params(pb, scene, time, eye, center, up);
+                         ThreadPool& pool, int max_steps) {
+    RenderParams rp = make_params(pb, scene, time, eye, center, up, max_steps);
     pool.parallel_for([&](uint32_t id, uint32_t n) {
         uint32_t y_start = (pb.height * id) / n;
         uint32_t y_end = (pb.height * (id + 1)) / n;

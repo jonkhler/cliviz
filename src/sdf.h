@@ -20,8 +20,9 @@ void sdf_render(PixelBuffer& pb, SdfFn scene, float time,
                 vec3 eye, vec3 center, vec3 up);
 
 // Parallel version using thread pool (row-band partitioning).
+// max_steps controls quality: 80 = full, 40 = fast, 20 = ultra-fast.
 void sdf_render_parallel(PixelBuffer& pb, SdfFn scene, float time,
                          vec3 eye, vec3 center, vec3 up,
-                         ThreadPool& pool);
+                         ThreadPool& pool, int max_steps = 80);
 
 } // namespace cliviz
