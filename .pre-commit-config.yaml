@@ -1,0 +1,16 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cmake-build
+        name: CMake build (type check + compile)
+        entry: cmake --build build --clean-first
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ctest
+        name: Run tests
+        entry: ctest --test-dir build --output-on-failure
+        language: system
+        pass_filenames: false
+        always_run: true
