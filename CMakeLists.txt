@@ -17,6 +17,16 @@ add_library(cliviz_static STATIC
 )
 target_include_directories(cliviz_static PUBLIC csrc/include/cliviz csrc/include)
 
+# ── Examples (skip when building Python wheel) ──
+
+if(NOT SKBUILD)
+    add_executable(fire csrc/examples/fire.cpp)
+    target_link_libraries(fire PRIVATE cliviz_static)
+
+    add_executable(starfield csrc/examples/starfield.cpp)
+    target_link_libraries(starfield PRIVATE cliviz_static)
+endif()
+
 # ── Tests (FetchContent for GTest, skip during wheel build) ──
 
 if(NOT SKBUILD)
