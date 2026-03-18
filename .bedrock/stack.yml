@@ -1,0 +1,8 @@
+# Fill in with /stack or manually. /qa reads these to know what to run.
+language: cpp20
+type_checker: clang++ -std=c++20 -Wall -Wextra -Wpedantic -Werror
+test_runner: ctest --test-dir build --output-on-failure
+package_manager: cmake + conan
+pre_commit_hooks:
+  - cmake --build build --clean-first
+  - ctest --test-dir build --output-on-failure
