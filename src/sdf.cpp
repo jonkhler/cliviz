@@ -28,18 +28,6 @@ inline vec3 calc_normal(SdfFn scene, vec3 p, float time) {
     });
 }
 
-// Simple ambient occlusion approximation
-inline float calc_ao(SdfFn scene, vec3 p, vec3 n, float time) {
-    float occ = 0.0f;
-    float scale = 1.0f;
-    for (int i = 0; i < 5; ++i) {
-        float h = 0.01f + 0.12f * static_cast<float>(i);
-        float d = scene(p + n * h, time);
-        occ += (h - d) * scale;
-        scale *= 0.95f;
-    }
-    return std::clamp(1.0f - 3.0f * occ, 0.0f, 1.0f);
-}
 
 } // namespace
 
@@ -99,8 +87,8 @@ void render_rows(PixelBuffer& pb, const RenderParams& rp,
             for (int i = 0; i < rp.max_steps; ++i) {
                 vec3 p = rp.eye + rd * t_ray;
                 float d = rp.scene(p, rp.time);
-                if (d < 0.001f) { hit = true; break; }
-                if (t_ray > 50.0f) break;
+                if (d < 0.005f) { hit = true; break; }
+                if (t_ray > 20.0f) break;
                 t_ray += d;
             }
 
@@ -111,18 +99,31 @@ void render_rows(PixelBuffer& pb, const RenderParams& rp,
 
                 float diff = std::max(dot(n, rp.light_dir), 0.0f);
 
+                // Shadow: 8 steps max (cheap soft shadow)
                 float shadow = 1.0f;
                 {
-                    float st = 0.02f;
-                    for (int i = 0; i < 32; ++i) {
+                    float st = 0.05f;
+                    for (int i = 0; i < 8; ++i) {
                         float sd = rp.scene(p + rp.light_dir * st, rp.time);
-                        if (sd < 0.001f) { shadow = 0.3f; break; }
-                        st += sd;
-                        if (st > 10.0f) break;
+                        if (sd < 0.005f) { shadow = 0.3f; break; }
+                        st += std::max(sd, 0.1f);
+                        if (st > 5.0f) break;
                     }
                 }
 
-                float ao = calc_ao(rp.scene, p, n, rp.time);
+                // AO: 3 samples instead of 5
+                float ao = 1.0f;
+                {
+                    float occ = 0.0f;
+                    float scale = 1.0f;
+                    for (int i = 0; i < 3; ++i) {
+                        float ao_h = 0.02f + 0.15f * static_cast<float>(i);
+                        float ao_d = rp.scene(p + n * ao_h, rp.time);
+                        occ += (ao_h - ao_d) * scale;
+                        scale *= 0.9f;
+                    }
+                    ao = std::clamp(1.0f - 2.5f * occ, 0.0f, 1.0f);
+                }
 
                 vec3 mat{
                     std::abs(n.x) * 0.4f + 0.3f,

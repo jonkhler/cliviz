@@ -99,7 +99,7 @@ int main() {
     float angle = 0.0f;
     bool auto_rotate = true;
     bool running = true;
-    int sdf_quality = 80; // adaptive: 80 (full), 40 (fast), 20 (ultra-fast)
+    int sdf_quality = 40; // adaptive: starts fast, ramps up if headroom
 
     auto last_frame = Clock::now();
 
