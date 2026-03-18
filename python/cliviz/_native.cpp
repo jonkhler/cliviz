@@ -19,13 +19,22 @@ struct Terminal {
     uint16_t cols = 0;
     uint16_t rows = 0;
     bool active = false;
+    std::string color_mode_override;
 
-    bool init() {
+    bool init(const std::string& color_mode_str = "") {
         if (!term_init()) return false;
         active = true;
         auto ts = term_get_size();
         cols = ts.cols;
         rows = ts.rows;
+        // Set color mode: explicit override or auto-detect
+        if (color_mode_str == "truecolor" || color_mode_str == "24bit") {
+            g_outbuf.color_mode = ColorMode::TrueColor;
+        } else if (color_mode_str == "256") {
+            g_outbuf.color_mode = ColorMode::Color256;
+        } else {
+            g_outbuf.color_mode = detect_color_mode();
+        }
         return true;
     }
 
@@ -117,14 +126,18 @@ NB_MODULE(_native, mod) {
 
     nb::class_<Terminal>(mod, "Terminal")
         .def(nb::init<>())
-        .def("init", &Terminal::init)
+        .def("__init__", [](Terminal& t, const std::string& color_mode) {
+            new (&t) Terminal();
+            t.color_mode_override = color_mode;
+        }, "color_mode"_a = "")
+        .def("init", &Terminal::init, "color_mode"_a = "")
         .def("shutdown", &Terminal::shutdown)
         .def("was_resized", &Terminal::was_resized)
         .def_ro("cols", &Terminal::cols)
         .def_ro("rows", &Terminal::rows)
         .def_ro("active", &Terminal::active)
         .def("__enter__", [](Terminal& t) -> Terminal& {
-            if (!t.init()) throw std::runtime_error("Failed to init terminal (not a TTY?)");
+            if (!t.init(t.color_mode_override)) throw std::runtime_error("Failed to init terminal (not a TTY?)");
             return t;
         })
         .def("__exit__", [](Terminal& t, const nb::args&) {

@@ -14,6 +14,7 @@ add_library(cliviz_static STATIC
     csrc/src/term.cpp
     csrc/src/framebuf.cpp
     csrc/src/pixbuf.cpp
+    csrc/src/color.cpp
 )
 target_include_directories(cliviz_static PUBLIC csrc/include/cliviz csrc/include)
 

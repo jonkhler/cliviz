@@ -69,6 +69,11 @@ def test_draw_text_with_bg():
     pb.draw_text(0, 0, "AB", 255, 0, 0, 0, 0, 128)
 
 
+def test_terminal_accepts_color_mode():
+    t = cliviz.Terminal(color_mode="256")
+    # Should not crash — color mode stored for init
+
+
 def test_terminal_fails_gracefully_in_test():
     t = cliviz.Terminal()
     if not os.isatty(1):

@@ -1,11 +1,25 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string_view>
 #include <unistd.h>
 
 namespace cliviz {
+
+// ── Color mode ──
+
+enum class ColorMode : uint8_t {
+    TrueColor, // 24-bit: \e[38;2;R;G;Bm
+    Color256,  // 8-bit:  \e[38;5;Nm
+};
+
+// Auto-detect from $COLORTERM, $TERM_PROGRAM, $TERM
+ColorMode detect_color_mode();
+
+// Map RGB → nearest 256-color index (6×6×6 cube + 24 grayscale)
+uint8_t rgb_to_256(uint8_t r, uint8_t g, uint8_t b);
 
 // Pre-computed lookup table: uint8_t → decimal ASCII digits + length.
 // Fits in L1 cache (1024 bytes). Avoids sprintf entirely in the hot path.
@@ -112,23 +126,41 @@ struct OutputBuffer {
         append_byte('H');
     }
 
+    // ── Color emission (truecolor or 256-color) ──
+
+    ColorMode color_mode = ColorMode::TrueColor;
+
     void emit_fg(uint8_t r, uint8_t g, uint8_t b) {
-        append("\x1b[38;2;", 7);
-        append_uint8(r);
-        append_byte(';');
-        append_uint8(g);
-        append_byte(';');
-        append_uint8(b);
-        append_byte('m');
+        if (color_mode == ColorMode::Color256) {
+            emit_fg_256(rgb_to_256(r, g, b));
+        } else {
+            append("\x1b[38;2;", 7);
+            append_uint8(r); append_byte(';');
+            append_uint8(g); append_byte(';');
+            append_uint8(b); append_byte('m');
+        }
     }
 
     void emit_bg(uint8_t r, uint8_t g, uint8_t b) {
-        append("\x1b[48;2;", 7);
-        append_uint8(r);
-        append_byte(';');
-        append_uint8(g);
-        append_byte(';');
-        append_uint8(b);
+        if (color_mode == ColorMode::Color256) {
+            emit_bg_256(rgb_to_256(r, g, b));
+        } else {
+            append("\x1b[48;2;", 7);
+            append_uint8(r); append_byte(';');
+            append_uint8(g); append_byte(';');
+            append_uint8(b); append_byte('m');
+        }
+    }
+
+    void emit_fg_256(uint8_t idx) {
+        append("\x1b[38;5;", 7);
+        append_uint8(idx);
+        append_byte('m');
+    }
+
+    void emit_bg_256(uint8_t idx) {
+        append("\x1b[48;5;", 7);
+        append_uint8(idx);
         append_byte('m');
     }
 
