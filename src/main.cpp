@@ -43,7 +43,7 @@ int read_key() {
 
     if (c == '\x1b') {
         // Escape sequence
-        char seq[2];
+        char seq[2]{};
         if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
         if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
         if (seq[0] == '[') {
@@ -73,6 +73,9 @@ int main() {
         std::fprintf(stderr, "Cannot determine terminal size\n");
         return 1;
     }
+    // Clamp to reasonable limits to prevent excessive allocation
+    ts.cols = std::min(ts.cols, static_cast<uint16_t>(1000));
+    ts.rows = std::min(ts.rows, static_cast<uint16_t>(500));
 
     auto pb = PixelBuffer::create(ts.cols, ts.rows - 1); // leave 1 row for status
     ZBuffer zb(pb->width, pb->height);
@@ -123,6 +126,8 @@ int main() {
         // Handle terminal resize
         if (term_was_resized()) {
             ts = term_get_size();
+            ts.cols = std::min(ts.cols, static_cast<uint16_t>(1000));
+            ts.rows = std::min(ts.rows, static_cast<uint16_t>(500));
             if (ts.cols > 0 && ts.rows > 1) {
                 pb = PixelBuffer::create(ts.cols, ts.rows - 1);
                 zb = ZBuffer(pb->width, pb->height);

@@ -52,12 +52,18 @@ struct OutputBuffer {
 
     void clear() { len = 0; }
 
+    [[nodiscard]] uint32_t remaining() const { return CAPACITY - len; }
+
     void append(const char* s, uint32_t n) {
+        if (len + n > CAPACITY) flush();
         std::memcpy(data + len, s, n);
         len += n;
     }
 
-    void append_byte(char c) { data[len++] = c; }
+    void append_byte(char c) {
+        if (len >= CAPACITY) flush();
+        data[len++] = c;
+    }
 
     void append_uint8(uint8_t v) {
         const auto& e = digit_table.entries[v];

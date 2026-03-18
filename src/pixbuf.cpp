@@ -1,5 +1,6 @@
 #include "pixbuf.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
@@ -102,10 +103,13 @@ void PixelBuffer::encode_all() {
 
         uint32_t col = 0;
 #ifdef __ARM_NEON
-        // Process 4 cells at a time: load 12 bytes (4×RGB) from each row
-        for (; col + 4 <= fb->width; col += 4) {
-            // Load 4 top pixels (12 bytes) and 4 bottom pixels (12 bytes)
-            // We load 16 bytes and use only the first 12
+        // Process 4 cells at a time: vld1q loads 16 bytes, we need 12 (4×RGB).
+        // Ensure at least 16 bytes remain in the row to avoid OOB read.
+        uint32_t neon_limit = (stride >= 16) ? (stride - 16) / 3 + 1 : 0;
+        neon_limit = std::min(neon_limit, fb->width);
+        // Round down to multiple of 4
+        neon_limit = (neon_limit / 4) * 4;
+        for (; col < neon_limit; col += 4) {
             uint8x16_t top_v = vld1q_u8(top_row + col * 3);
             uint8x16_t bot_v = vld1q_u8(bot_row + col * 3);
 
