@@ -5,3 +5,5 @@ python/build/
 python/*.egg-info/
 __pycache__/
 .pytest_cache/
+frame_dump.bin
+uv.lock

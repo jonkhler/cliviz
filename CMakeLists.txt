@@ -34,10 +34,25 @@ if(NOT SKBUILD)
     target_link_libraries(cliviz_demo PRIVATE cliviz_static)
 endif()
 
-# ── Tests (optional — not available when building via pip/uv) ──
+# ── Tests (FetchContent for GTest, skip during wheel build) ──
 
-find_package(GTest QUIET)
-if(GTest_FOUND)
+if(NOT SKBUILD)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.15.2
+        GIT_SHALLOW TRUE
+    )
+    # Suppress GTest install and compiler warnings
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # Temporarily disable -Werror for GTest sources
+    set(CMAKE_CXX_FLAGS_SAVED "${CMAKE_CXX_FLAGS}")
+    string(REPLACE "-Werror" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    FetchContent_MakeAvailable(googletest)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_SAVED}")
+
     enable_testing()
     add_subdirectory(tests)
 endif()
