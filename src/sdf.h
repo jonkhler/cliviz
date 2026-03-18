@@ -2,6 +2,7 @@
 
 #include "math3d.h"
 #include "pixbuf.h"
+#include "threadpool.h"
 
 namespace cliviz {
 
@@ -17,5 +18,10 @@ float sdf_scene_default(vec3 pos, float time); // composed scene
 // Camera looks from `eye` toward `center`.
 void sdf_render(PixelBuffer& pb, SdfFn scene, float time,
                 vec3 eye, vec3 center, vec3 up);
+
+// Parallel version using thread pool (row-band partitioning).
+void sdf_render_parallel(PixelBuffer& pb, SdfFn scene, float time,
+                         vec3 eye, vec3 center, vec3 up,
+                         ThreadPool& pool);
 
 } // namespace cliviz

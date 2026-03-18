@@ -14,6 +14,7 @@ add_library(cliviz_lib STATIC
     src/pixbuf.cpp
     src/raster.cpp
     src/sdf.cpp
+    src/threadpool.cpp
 )
 target_include_directories(cliviz_lib PUBLIC src)
 

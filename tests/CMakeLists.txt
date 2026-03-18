@@ -7,6 +7,7 @@ add_executable(cliviz_tests
     math3d_test.cpp
     raster_test.cpp
     sdf_test.cpp
+    threadpool_test.cpp
 )
 
 target_link_libraries(cliviz_tests PRIVATE cliviz_lib GTest::gtest_main)

@@ -10,6 +10,7 @@
 #include "raster.h"
 #include "sdf.h"
 #include "term.h"
+#include "threadpool.h"
 
 using namespace cliviz;
 using Clock = std::chrono::steady_clock;
@@ -77,6 +78,7 @@ int main() {
     ZBuffer zb(pb->width, pb->height);
     OutputBuffer outbuf;
 
+    ThreadPool pool;
     Mesh cube = make_cube();
     Mesh sphere = make_icosphere(2);
     Mesh* active_mesh = &cube;
@@ -142,7 +144,7 @@ int main() {
             float cx = std::cos(cam.pitch), sx = std::sin(cam.pitch);
             float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
             vec3 eye{cam.distance * cx * sy, cam.distance * sx, cam.distance * cx * cy};
-            sdf_render(*pb, sdf_scene_default, angle, eye, {0, 0, 0}, {0, 1, 0});
+            sdf_render_parallel(*pb, sdf_scene_default, angle, eye, {0, 0, 0}, {0, 1, 0}, pool);
         } else {
             pb->clear(15, 15, 25);
             zb.clear();

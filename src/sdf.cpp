@@ -74,35 +74,30 @@ float sdf_scene_default(vec3 pos, float time) {
     return scene;
 }
 
-void sdf_render(PixelBuffer& pb, SdfFn scene, float time,
-                vec3 eye, vec3 center, vec3 up) {
-    vec3 fwd = normalize(center - eye);
-    vec3 right = normalize(cross(fwd, up));
-    vec3 cam_up = cross(right, fwd);
+namespace {
 
-    auto w = static_cast<float>(pb.width);
-    auto h = static_cast<float>(pb.height);
-    float aspect = w / h;
+struct RenderParams {
+    SdfFn scene;
+    float time;
+    vec3 eye, fwd, right, cam_up;
+    float w, h, aspect;
+    vec3 light_dir, light_col, sky_col;
+};
 
-    // Light direction
-    vec3 light_dir = normalize({-0.5f, 0.8f, 0.6f});
-    vec3 light_col{1.0f, 0.95f, 0.9f};
-    vec3 sky_col{0.4f, 0.5f, 0.7f};
-
-    for (uint32_t py = 0; py < pb.height; ++py) {
+void render_rows(PixelBuffer& pb, const RenderParams& rp,
+                 uint32_t y_start, uint32_t y_end) {
+    for (uint32_t py = y_start; py < y_end; ++py) {
         for (uint32_t px = 0; px < pb.width; ++px) {
-            // NDC coords
-            float u = (2.0f * (static_cast<float>(px) + 0.5f) / w - 1.0f) * aspect;
-            float v = 1.0f - 2.0f * (static_cast<float>(py) + 0.5f) / h;
+            float u = (2.0f * (static_cast<float>(px) + 0.5f) / rp.w - 1.0f) * rp.aspect;
+            float v = 1.0f - 2.0f * (static_cast<float>(py) + 0.5f) / rp.h;
 
-            vec3 rd = normalize(fwd + right * u + cam_up * v);
+            vec3 rd = normalize(rp.fwd + rp.right * u + rp.cam_up * v);
 
-            // Raymarch
             float t_ray = 0.0f;
             bool hit = false;
             for (int i = 0; i < 80; ++i) {
-                vec3 p = eye + rd * t_ray;
-                float d = scene(p, time);
+                vec3 p = rp.eye + rd * t_ray;
+                float d = rp.scene(p, rp.time);
                 if (d < 0.001f) { hit = true; break; }
                 if (t_ray > 50.0f) break;
                 t_ray += d;
@@ -110,61 +105,90 @@ void sdf_render(PixelBuffer& pb, SdfFn scene, float time,
 
             uint8_t r, g, b;
             if (hit) {
-                vec3 p = eye + rd * t_ray;
-                vec3 n = calc_normal(scene, p, time);
+                vec3 p = rp.eye + rd * t_ray;
+                vec3 n = calc_normal(rp.scene, p, rp.time);
 
-                // Diffuse lighting
-                float diff = std::max(dot(n, light_dir), 0.0f);
+                float diff = std::max(dot(n, rp.light_dir), 0.0f);
 
-                // Shadow ray
                 float shadow = 1.0f;
                 {
                     float st = 0.02f;
                     for (int i = 0; i < 32; ++i) {
-                        float sd = scene(p + light_dir * st, time);
+                        float sd = rp.scene(p + rp.light_dir * st, rp.time);
                         if (sd < 0.001f) { shadow = 0.3f; break; }
                         st += sd;
                         if (st > 10.0f) break;
                     }
                 }
 
-                float ao = calc_ao(scene, p, n, time);
+                float ao = calc_ao(rp.scene, p, n, rp.time);
 
-                // Material color based on normal
                 vec3 mat{
                     std::abs(n.x) * 0.4f + 0.3f,
                     std::abs(n.y) * 0.4f + 0.3f,
                     std::abs(n.z) * 0.4f + 0.3f,
                 };
 
-                // Floor gets checkerboard
                 if (n.y > 0.9f) {
                     float check = std::fmod(std::floor(p.x) + std::floor(p.z), 2.0f);
                     if (check < 0.0f) check += 2.0f;
                     mat = check < 1.0f ? vec3{0.4f, 0.4f, 0.45f} : vec3{0.6f, 0.6f, 0.65f};
                 }
 
-                // Combine
-                vec3 col = mat * (light_col * diff * shadow + sky_col * 0.15f) * ao;
-
-                // Fog
+                vec3 col = mat * (rp.light_col * diff * shadow + rp.sky_col * 0.15f) * ao;
                 float fog = std::exp(-t_ray * 0.04f);
-                col = col * fog + sky_col * (1.0f - fog);
+                col = col * fog + rp.sky_col * (1.0f - fog);
 
                 r = static_cast<uint8_t>(std::clamp(col.x * 255.0f, 0.0f, 255.0f));
                 g = static_cast<uint8_t>(std::clamp(col.y * 255.0f, 0.0f, 255.0f));
                 b = static_cast<uint8_t>(std::clamp(col.z * 255.0f, 0.0f, 255.0f));
             } else {
-                // Sky gradient
                 float sky_t = 0.5f * (rd.y + 1.0f);
-                vec3 sky = sky_col * sky_t + vec3{0.15f, 0.1f, 0.2f} * (1.0f - sky_t);
+                vec3 sky = rp.sky_col * sky_t + vec3{0.15f, 0.1f, 0.2f} * (1.0f - sky_t);
                 r = static_cast<uint8_t>(std::clamp(sky.x * 255.0f, 0.0f, 255.0f));
                 g = static_cast<uint8_t>(std::clamp(sky.y * 255.0f, 0.0f, 255.0f));
                 b = static_cast<uint8_t>(std::clamp(sky.z * 255.0f, 0.0f, 255.0f));
             }
-            pb.set(px, py, r, g, b);
+
+            // Write directly to pixel array (no dirty tracking needed — we mark all dirty)
+            uint32_t idx = (py * pb.width + px) * 3;
+            pb.pixels[idx + 0] = r;
+            pb.pixels[idx + 1] = g;
+            pb.pixels[idx + 2] = b;
         }
     }
+}
+
+RenderParams make_params(PixelBuffer& pb, SdfFn scene, float time,
+                         vec3 eye, vec3 center, vec3 up) {
+    vec3 fwd = normalize(center - eye);
+    vec3 right_v = normalize(cross(fwd, up));
+    vec3 cam_up = cross(right_v, fwd);
+    auto w = static_cast<float>(pb.width);
+    auto h = static_cast<float>(pb.height);
+    return {scene, time, eye, fwd, right_v, cam_up, w, h, w / h,
+            normalize({-0.5f, 0.8f, 0.6f}), {1.0f, 0.95f, 0.9f}, {0.4f, 0.5f, 0.7f}};
+}
+
+} // namespace
+
+void sdf_render(PixelBuffer& pb, SdfFn scene, float time,
+                vec3 eye, vec3 center, vec3 up) {
+    RenderParams rp = make_params(pb, scene, time, eye, center, up);
+    render_rows(pb, rp, 0, pb.height);
+    pb.fb->mark_all_dirty();
+}
+
+void sdf_render_parallel(PixelBuffer& pb, SdfFn scene, float time,
+                         vec3 eye, vec3 center, vec3 up,
+                         ThreadPool& pool) {
+    RenderParams rp = make_params(pb, scene, time, eye, center, up);
+    pool.parallel_for([&](uint32_t id, uint32_t n) {
+        uint32_t y_start = (pb.height * id) / n;
+        uint32_t y_end = (pb.height * (id + 1)) / n;
+        render_rows(pb, rp, y_start, y_end);
+    });
+    pb.fb->mark_all_dirty();
 }
 
 } // namespace cliviz
