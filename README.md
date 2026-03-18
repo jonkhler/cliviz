@@ -34,6 +34,10 @@ with cliviz.Terminal() as term:
     term.cols, term.rows       # dimensions
     term.was_resized()         # poll for SIGWINCH
 
+# Color mode: auto-detected, or override
+with cliviz.Terminal(color_mode="256") as term: ...      # Terminal.app
+with cliviz.Terminal(color_mode="truecolor") as term: ... # Ghostty/Kitty
+
 # Pixel buffer
 pb = cliviz.PixelBuffer(cols, rows)
 pb.pixels                      # numpy (H, W, 3) uint8, zero-copy
@@ -51,24 +55,31 @@ pb.flush_full()                # encode all + write (full redraws)
 # Split pipeline for text overlays on full redraws
 pb.encode_all()                # pixels → cells
 pb.draw_text(0, 0, "60fps")   # after encode, before present
-pb.present_nodiff()            # write all cells to terminal
+pb.present()                   # diff + write to terminal
+
+# Adaptive frame pacing
+pacer = cliviz.FramePacer(target_fps=60)
+while running:
+    dt = pacer.pace()          # sleeps, adapts to terminal throughput
+    # ... render ...
+    pb.present()
 ```
 
 ## Architecture
 
-```
-Your code (Python)              cliviz C++ core (~500 LOC)
-numpy / Taichi / wgpu / …
-        │                       PixelBuffer ──encode──▶ Framebuffer
-        │ pb.pixels             (RGB array)    ▀▀▀     (8-byte cells)
-        │ (zero-copy)                                      │
-        ▼                                              diff engine
-   write RGB pixels                                        │
-                                                     OutputBuffer
-                                                    (ANSI escapes)
-                                                           │
-                                                    write(STDOUT)
-                                                  synchronized output
+```mermaid
+graph TD
+    A["Your code (Python)<br/>numpy / Taichi / wgpu / ..."] -->|"pb.pixels<br/>(zero-copy numpy)"| B
+    B["PixelBuffer<br/>RGB pixel array"] -->|encode ▀| C
+    C["Framebuffer<br/>8-byte packed cells"] -->|diff engine<br/>dirty bitmask| D
+    D["OutputBuffer<br/>ANSI escape stream"] -->|"single write()"| E
+    E["Terminal<br/>Ghostty / Kitty / iTerm / ..."]
+
+    style A fill:#2d3748,stroke:#4a5568,color:#e2e8f0
+    style B fill:#2d3748,stroke:#4a5568,color:#e2e8f0
+    style C fill:#1a365d,stroke:#2b6cb0,color:#bee3f8
+    style D fill:#1a365d,stroke:#2b6cb0,color:#bee3f8
+    style E fill:#22543d,stroke:#38a169,color:#c6f6d5
 ```
 
 ## Why C++ instead of pure Python?
@@ -90,4 +101,4 @@ ctest --test-dir build
 
 ## License
 
-MIT — Jonas Köhler
+MIT
