@@ -1,5 +1,9 @@
 # cliviz
 
+<p align="center">
+  <img src="assets/demo.png" width="720" alt="GPU-raymarched metaballs with glass refraction and mirror reflection running at 109fps in Ghostty">
+</p>
+
 High-throughput terminal pixel engine. Treats your terminal as a pixel display using Unicode half-block characters (`▀`) for 2x vertical sub-pixel resolution. The C++ core handles terminal I/O, differential rendering, and ANSI escape generation. You bring the pixels — from numpy, GPU compute, or any source.
 
 ## Install
