@@ -182,12 +182,10 @@ def main() -> None:
         yaw, pitch, distance = 0.4, 0.3, 5.0
         t = 0.0
         auto_rotate = True
-        last = time.monotonic()
+        pacer = cliviz.FramePacer(target_fps=60)
 
         while True:
-            now = time.monotonic()
-            dt = now - last
-            last = now
+            dt = pacer.pace()
 
             key = read_key(sys.stdin.fileno())
             while key:
@@ -224,11 +222,8 @@ def main() -> None:
 
             # encode pixels → draw text overlay → present to terminal
             pb.encode_all()
-            fps = 1.0 / dt if dt > 0 else 0
-            pb.draw_text(1, 0, f"{fps:.0f}fps   ", 255, 255, 255, 30, 30, 30)
+            pb.draw_text(1, 0, f"{pacer.fps:.0f}fps   ", 255, 255, 255, 30, 30, 30)
             pb.present()
-
-            # No frame limiter — let GPU + terminal throughput determine FPS
 
 
 if __name__ == "__main__":

@@ -412,12 +412,10 @@ def main() -> None:
         t = 0.0
         current = 0
         auto_cycle = True
-        last = time.monotonic()
+        pacer = cliviz.FramePacer(target_fps=60)
 
         while True:
-            now = time.monotonic()
-            dt = now - last
-            last = now
+            dt = pacer.pace()
             t += dt
 
             key = read_key(sys.stdin.fileno())
@@ -440,13 +438,10 @@ def main() -> None:
             render(pixels, pb.width, pb.height)
 
             pb.encode_all()
-            fps = 1.0 / dt if dt > 0 else 0
             name = EFFECT_NAMES[current]
-            label = f" {fps:.0f}fps  {name}  [1-4]select [space]auto [q]uit "
+            label = f" {pacer.fps:.0f}fps  {name}  [1-4]select [space]auto [q]uit "
             pb.draw_text(1, 0, label, 220, 220, 220, 20, 20, 30)
             pb.present()
-
-            time.sleep(max(0, 0.008 - (time.monotonic() - now)))
 
 
 if __name__ == "__main__":

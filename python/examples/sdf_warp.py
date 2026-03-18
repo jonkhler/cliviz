@@ -236,12 +236,10 @@ def main() -> None:
         t = 0.0
         current_scene = 0
         scene_id[None] = current_scene
-        last = time.monotonic()
+        pacer = cliviz.FramePacer(target_fps=60)
 
         while True:
-            now = time.monotonic()
-            dt = now - last
-            last = now
+            dt = pacer.pace()
             t += dt * 0.6
 
             key = read_key(sys.stdin.fileno())
@@ -269,9 +267,8 @@ def main() -> None:
                    distance * cx * sy, distance * sx, distance * cx * cy)
 
             pb.encode_all()
-            fps = 1.0 / dt if dt > 0 else 0
             name = SCENE_NAMES[current_scene]
-            pb.draw_text(1, 0, f"{fps:.0f}fps  {name}  [1-4]scenes [wasd]orbit [q]uit",
+            pb.draw_text(1, 0, f"{pacer.fps:.0f}fps  {name}  [1-4]scenes [wasd]orbit [q]uit",
                          255, 255, 255, 20, 20, 30)
             pb.present()
 

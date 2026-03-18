@@ -33,13 +33,11 @@ def main() -> None:
         x_norm = x_grid / w * 8.0
         y_norm = y_grid / h * 8.0
 
+        pacer = cliviz.FramePacer(target_fps=60)
         t = 0.0
-        last = time.monotonic()
 
         while True:
-            now = time.monotonic()
-            dt = now - last
-            last = now
+            dt = pacer.pace()
             t += dt * 0.8
 
             if read_key(sys.stdin.fileno()) == ord("q"):
@@ -65,11 +63,8 @@ def main() -> None:
             pixels[:, :, 2] = b.astype(np.uint8)
 
             pb.encode_all()
-            fps = 1.0 / dt if dt > 0 else 0
-            pb.draw_text(1, 0, f" {fps:.0f}fps  plasma  q=quit ", 255, 255, 255, 40, 0, 40)
+            pb.draw_text(1, 0, f" {pacer.fps:.0f}fps  plasma  q=quit ", 255, 255, 255, 40, 0, 40)
             pb.present()
-
-            time.sleep(max(0, 0.008 - (time.monotonic() - now)))  # cap ~120fps
 
 
 if __name__ == "__main__":
