@@ -1,0 +1,2 @@
+Project name: cliviz
+C++20 with Clang (-Wpedantic), Google Test, CMake + Conan
