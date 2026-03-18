@@ -228,7 +228,7 @@ def main() -> None:
             pb.draw_text(1, 0, f"{fps:.0f}fps   ", 255, 255, 255, 30, 30, 30)
             pb.present()
 
-            time.sleep(max(0, 0.016 - (time.monotonic() - now)))
+            # No frame limiter — let GPU + terminal throughput determine FPS
 
 
 if __name__ == "__main__":
