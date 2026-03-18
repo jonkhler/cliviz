@@ -8,6 +8,7 @@
 #include "outbuf.h"
 #include "pixbuf.h"
 #include "raster.h"
+#include "sdf.h"
 #include "term.h"
 
 using namespace cliviz;
@@ -84,6 +85,8 @@ int main() {
     float aspect = static_cast<float>(pb->width) / static_cast<float>(pb->height);
     mat4 proj = mat4::perspective(static_cast<float>(M_PI / 3.0), aspect, 0.1f, 100.0f);
 
+    enum class Mode { Raster, SDF } mode = Mode::Raster;
+
     float angle = 0.0f;
     bool auto_rotate = true;
     bool running = true;
@@ -106,8 +109,9 @@ int main() {
         case '+': case '=': cam.distance = std::max(1.5f, cam.distance - 0.3f); break;
         case '-': cam.distance = std::min(20.0f, cam.distance + 0.3f); break;
         case ' ': auto_rotate = !auto_rotate; break;
-        case '1': active_mesh = &cube; break;
-        case '2': active_mesh = &sphere; break;
+        case '1': active_mesh = &cube; mode = Mode::Raster; break;
+        case '2': active_mesh = &sphere; mode = Mode::Raster; break;
+        case '3': mode = Mode::SDF; break;
         default: break;
         }
 
@@ -118,13 +122,19 @@ int main() {
         }
 
         // Render
-        pb->clear(15, 15, 25); // dark blue background
-        zb.clear();
-
-        mat4 model = mat4::rotate_y(angle) * mat4::rotate_x(angle * 0.3f);
-        mat4 mvp = proj * cam.view_matrix() * model;
-
-        uint32_t tris_drawn = rasterize(*active_mesh, mvp, *pb, zb);
+        uint32_t tris_drawn = 0;
+        if (mode == Mode::SDF) {
+            float cx = std::cos(cam.pitch), sx = std::sin(cam.pitch);
+            float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
+            vec3 eye{cam.distance * cx * sy, cam.distance * sx, cam.distance * cx * cy};
+            sdf_render(*pb, sdf_scene_default, angle, eye, {0, 0, 0}, {0, 1, 0});
+        } else {
+            pb->clear(15, 15, 25);
+            zb.clear();
+            mat4 model = mat4::rotate_y(angle) * mat4::rotate_x(angle * 0.3f);
+            mat4 mvp = proj * cam.view_matrix() * model;
+            tris_drawn = rasterize(*active_mesh, mvp, *pb, zb);
+        }
         pb->encode();
 
         outbuf.clear();
@@ -138,10 +148,11 @@ int main() {
         outbuf.emit_cursor_to(ts.rows, 1);
         outbuf.append("\x1b[0m\x1b[7m", 8); // reset + inverse
         char status[128];
+        const char* mode_name = mode == Mode::SDF ? "sdf" :
+                                 (active_mesh == &cube ? "cube" : "sphere");
         int n = std::snprintf(status, sizeof(status),
-            " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD/arrows:cam +-:zoom 1/2:mesh q:quit ",
-            active_mesh == &cube ? "cube" : "sphere",
-            tris_drawn, cells_emitted, frame_ms, fps);
+            " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD/arrows:cam +-:zoom 1/2/3:mode q:quit ",
+            mode_name, tris_drawn, cells_emitted, frame_ms, fps);
         // Pad to terminal width
         for (int i = n; i < ts.cols; ++i) status[i] = ' ';
         outbuf.append(status, static_cast<uint32_t>(std::min(static_cast<int>(ts.cols), static_cast<int>(sizeof(status)))));

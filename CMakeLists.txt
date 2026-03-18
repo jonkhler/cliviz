@@ -13,6 +13,7 @@ add_library(cliviz_lib STATIC
     src/framebuf.cpp
     src/pixbuf.cpp
     src/raster.cpp
+    src/sdf.cpp
 )
 target_include_directories(cliviz_lib PUBLIC src)
 
