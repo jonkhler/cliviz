@@ -79,20 +79,37 @@ def smooth_min(a: float, b: float, k: float) -> float:
 
 
 @ti.func
+def blob_pos(i: int, t: float) -> ti.math.vec3:
+    fi = float(i)
+    return ti.math.vec3(
+        ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 1.2,
+        ti.cos(t * (0.5 + fi * 0.17) + fi * 2.1) * 0.6,
+        ti.sin(t * (0.3 + fi * 0.19) + fi * 0.7) * 1.0,
+    )
+
+
+@ti.func
 def sdf_metaballs(p: ti.math.vec3, t: float) -> float:
-    # First blob — initialize d properly (not 1e10 which breaks smooth union)
-    bp0 = ti.math.vec3(ti.sin(t * 0.7) * 1.0, ti.cos(t * 0.5) * 0.7, ti.sin(t * 0.3) * 0.8)
-    d = (p - bp0).norm() - 0.5
-    for i in range(1, 5):
-        fi = float(i)
-        bp = ti.math.vec3(
-            ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 1.0,
-            ti.cos(t * (0.5 + fi * 0.17) + fi * 2.1) * 0.7,
-            ti.sin(t * (0.3 + fi * 0.19) + fi * 0.7) * 0.8,
-        )
-        sd = (p - bp).norm() - (0.4 + 0.1 * ti.sin(t + fi))
-        d = smooth_min(d, sd, 0.5)
+    d = (p - blob_pos(0, t)).norm() - 0.55  # blob 0: glass
+    sd1 = (p - blob_pos(1, t)).norm() - 0.55  # blob 1: mirror
+    d = smooth_min(d, sd1, 0.05)  # tiny k — almost hard union, keeps them distinct
+    for i in range(2, 5):
+        sd = (p - blob_pos(i, t)).norm() - (0.4 + 0.1 * ti.sin(t + float(i)))
+        d = smooth_min(d, sd, 0.4)
     return d
+
+
+@ti.func
+def closest_blob_id(p: ti.math.vec3, t: float) -> int:
+    """Return 0 for glass blob, 1 for mirror blob, 2+ for opaque."""
+    best_id = 0
+    best_d = (p - blob_pos(0, t)).norm()
+    for i in range(1, 5):
+        dd = (p - blob_pos(i, t)).norm()
+        if dd < best_d:
+            best_d = dd
+            best_id = i
+    return best_id
 
 
 @ti.func
@@ -153,63 +170,75 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
         n = meta_normal(pos, t)
         light = ti.math.normalize(ti.math.vec3(1.0, 1.5, -1.0))
         diff = ti.max(ti.math.dot(n, light), 0.0)
-
         half_v = ti.math.normalize(light - rd)
         spec = ti.pow(ti.max(ti.math.dot(n, half_v), 0.0), 64.0)
+        rim = ti.pow(1.0 - ti.max(ti.math.dot(n, -rd), 0.0), 3.0)
+        fresnel = 0.04 + 0.96 * ti.pow(1.0 - ti.max(ti.math.dot(n, -rd), 0.0), 5.0)
 
-        rim = 1.0 - ti.max(ti.math.dot(n, -rd), 0.0)
-        rim = ti.pow(rim, 3.0)
+        is_floor = ti.math.clamp((-(pos.y + 1.4)) * 100.0, 0.0, 1.0)
+        blob_id = closest_blob_id(pos, t)
 
         # Floor: checkerboard
         check = ti.math.mod(ti.floor(pos.x * 2.0) + ti.floor(pos.z * 2.0), 2.0)
         if check < 0.0:
             check += 2.0
-        floor_mat = ti.math.vec3(0.15, 0.15, 0.2) * (1.0 - check * 0.3) + ti.math.vec3(0.25, 0.25, 0.3) * (check * 0.3)
+        floor_col = ti.math.vec3(0.12, 0.12, 0.18) + ti.math.vec3(0.08) * check
 
-        # Blob: iridescent
-        blob_mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
-                           ti.math.vec3(0.5), ti.math.vec3(0.5),
-                           ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
-
-        floor_blend = ti.math.clamp((-(pos.y + 1.4)) * 100.0, 0.0, 1.0)
-        is_blob = 1.0 - floor_blend
-
-        # Glass: first blob gets Fresnel + refraction
-        # Check if we're near the first blob
-        bp0 = ti.math.vec3(ti.sin(t * 0.7) * 1.0, ti.cos(t * 0.5) * 0.7, ti.sin(t * 0.3) * 0.8)
-        dist_to_blob0 = (pos - bp0).norm()
-        # Generous radius — the blob surface is at ~0.5 from center
-        glass_amount = ti.math.clamp(1.0 - (dist_to_blob0 - 0.3) * 3.0, 0.0, 1.0) * is_blob
-
-        # Fresnel — more reflective at glancing angles
-        fresnel = ti.pow(1.0 - ti.max(ti.math.dot(n, -rd), 0.0), 4.0)
-        fresnel = 0.1 + 0.9 * fresnel
-
-        # Refracted ray — trace through glass, hit the floor
-        refr_col = bg_col
-        if glass_amount > 0.1:
-            refr_rd = refract_ray(rd, n, 1.0 / 1.45)
-            # Approximate: skip blob interior, march to floor only
-            # Floor is at y = -1.5, so compute where refracted ray hits it
-            floor_t = (-1.5 - pos.y) / (refr_rd.y - 0.0001)  # avoid div by 0
+        if is_floor > 0.5:
+            # Floor
+            col = floor_col * (diff * 0.6 + 0.25) + ti.math.vec3(spec * 0.3)
+        elif blob_id == 0:
+            # GLASS BLOB — refract through to floor
+            refr_rd = refract_ray(rd, n, 1.0 / 1.5)
+            floor_t = (-1.5 - pos.y) / (refr_rd.y - 0.0001)
+            refr_col = bg_col * 0.5 + ti.math.vec3(0.05, 0.08, 0.12)
             if floor_t > 0.0:
-                floor_pos = pos + refr_rd * floor_t
-                fcheck = ti.math.mod(ti.floor(floor_pos.x * 2.0) + ti.floor(floor_pos.z * 2.0), 2.0)
-                if fcheck < 0.0:
-                    fcheck += 2.0
-                # Distorted checkerboard through glass — tinted blue-green
-                refr_col = ti.math.vec3(0.1, 0.15, 0.2) * (1.0 - fcheck * 0.3) + ti.math.vec3(0.2, 0.25, 0.3) * (fcheck * 0.3)
-                refr_col += ti.math.vec3(0.05, 0.1, 0.15)  # glass tint
-
-        # Combine: glass blob uses fresnel blend of reflection + refraction
-        opaque_col = blob_mat * (diff * 0.6 + 0.15)
-        glass_col = refr_col * (1.0 - fresnel) + (ti.math.vec3(spec * 1.5) + ti.math.vec3(0.3, 0.5, 0.9) * rim * 0.6) * fresnel
-        mat_col = opaque_col * (1.0 - glass_amount) + glass_col * glass_amount
-        # Floor stays opaque
-        mat = mat_col * (1.0 - floor_blend) + floor_mat * floor_blend
-
-        col = mat * (diff * 0.5 + 0.2) * (1.0 - glass_amount) + mat * glass_amount
-        col += ti.math.vec3(spec) * 0.5 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.2
+                fp = pos + refr_rd * floor_t
+                fc = ti.math.mod(ti.floor(fp.x * 2.0) + ti.floor(fp.z * 2.0), 2.0)
+                if fc < 0.0:
+                    fc += 2.0
+                refr_col = ti.math.vec3(0.1, 0.15, 0.22) + ti.math.vec3(0.1) * fc
+            # Fresnel: edges reflect, center refracts
+            col = refr_col * (1.0 - fresnel) + ti.math.vec3(0.4, 0.6, 0.9) * fresnel
+            col += ti.math.vec3(spec * 2.0)  # bright specular highlight
+            col += ti.math.vec3(0.15, 0.25, 0.4) * rim  # blue rim
+        elif blob_id == 1:
+            # MIRROR BLOB — reflect and march again
+            refl_rd = rd - n * 2.0 * ti.math.dot(rd, n)
+            refl_col = bg_col
+            refl_t = 0.05
+            for _ in range(40):
+                rp = pos + refl_rd * refl_t
+                rd_refl = sdf_meta_scene(rp, t)
+                if rd_refl < 0.005:
+                    rn = meta_normal(rp, t)
+                    rdiff = ti.max(ti.math.dot(rn, light), 0.0)
+                    # Reflected hit — color based on what we hit
+                    r_floor = ti.math.clamp((-(rp.y + 1.4)) * 100.0, 0.0, 1.0)
+                    rc = ti.math.mod(ti.floor(rp.x * 2.0) + ti.floor(rp.z * 2.0), 2.0)
+                    if rc < 0.0:
+                        rc += 2.0
+                    r_mat = ti.math.vec3(0.12, 0.12, 0.18) + ti.math.vec3(0.08) * rc
+                    r_blob = palette(ti.math.dot(rn, ti.math.vec3(1, 0.5, 0.3)) * 0.5 + t * 0.1,
+                                     ti.math.vec3(0.5), ti.math.vec3(0.5),
+                                     ti.math.vec3(1, 0.7, 0.4), ti.math.vec3(0, 0.15, 0.2))
+                    refl_col = r_mat * r_floor + r_blob * (1.0 - r_floor)
+                    refl_col *= (rdiff * 0.6 + 0.2)
+                    break
+                refl_t += rd_refl
+                if refl_t > 15.0:
+                    break
+            # Mirror: tinted slightly chrome
+            col = refl_col * 0.85 + ti.math.vec3(0.1, 0.1, 0.12) * 0.15
+            col += ti.math.vec3(spec * 1.5)
+            col += ti.math.vec3(0.8, 0.85, 0.9) * rim * 0.15
+        else:
+            # OPAQUE BLOBS — iridescent
+            mat = palette(ti.math.dot(n, ti.math.vec3(1, 0.5, 0.3)) * 0.5 + t * 0.1,
+                          ti.math.vec3(0.5), ti.math.vec3(0.5),
+                          ti.math.vec3(1, 0.7, 0.4), ti.math.vec3(0, 0.15, 0.2))
+            col = mat * (diff * 0.6 + 0.15) + ti.math.vec3(spec) * 0.6
+            col += ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.3
 
         fog = ti.exp(-ray_t * 0.06)
         col = col * fog + bg_col * (1.0 - fog)
