@@ -1,5 +1,6 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/string.h>
 
 #include "framebuf.h"
 #include "outbuf.h"
@@ -127,5 +128,13 @@ NB_MODULE(_native, mod) {
         .def("fill_rect", &PyPixelBuffer::fill_rect,
              "x0"_a, "y0"_a, "x1"_a, "y1"_a, "r"_a, "g"_a, "b"_a)
         .def("flush", &PyPixelBuffer::flush, "Encode dirty cells and write to terminal")
-        .def("flush_full", &PyPixelBuffer::flush_full, "Encode all cells and write to terminal");
+        .def("flush_full", &PyPixelBuffer::flush_full, "Encode all cells and write to terminal")
+        .def("draw_text", [](PyPixelBuffer& self, uint32_t col, uint32_t row,
+                             const std::string& text,
+                             uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
+                             uint8_t bg_r, uint8_t bg_g, uint8_t bg_b) {
+            self.inner->draw_text(col, row, text.c_str(), fg_r, fg_g, fg_b, bg_r, bg_g, bg_b);
+        }, "col"_a, "row"_a, "text"_a,
+           "fg_r"_a, "fg_g"_a, "fg_b"_a,
+           "bg_r"_a = 0, "bg_g"_a = 0, "bg_b"_a = 0);
 }

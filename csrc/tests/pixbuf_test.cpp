@@ -182,6 +182,59 @@ TEST(PixelBuffer, EncodeAllMatchesEncode) {
     }
 }
 
+// ── Text rendering ──
+
+TEST(PixelBuffer, DrawTextSetsCellsWithAsciiGlyphs) {
+    auto pb = PixelBuffer::create(20, 5);
+    pb->clear(0, 0, 0);
+    pb->draw_text(2, 1, "Hi", 255, 255, 255, 0, 0, 0);
+
+    // Cell at (row=1, col=2) should have glyph 'H' (72)
+    const Cell& c0 = pb->fb->back[1 * 20 + 2];
+    EXPECT_EQ(c0.ch, static_cast<uint16_t>('H'));
+    EXPECT_EQ(c0.fg[0], 255u);
+    EXPECT_EQ(c0.bg[0], 0u);
+
+    // Cell at (row=1, col=3) should have glyph 'i' (105)
+    const Cell& c1 = pb->fb->back[1 * 20 + 3];
+    EXPECT_EQ(c1.ch, static_cast<uint16_t>('i'));
+}
+
+TEST(PixelBuffer, DrawTextMarksDirty) {
+    auto pb = PixelBuffer::create(20, 5);
+    pb->draw_text(0, 0, "AB", 255, 0, 0, 0, 0, 0);
+
+    // Cells should be dirty
+    uint32_t idx0 = 0;
+    uint32_t idx1 = 1;
+    EXPECT_NE(pb->fb->dirty_mask[idx0 >> 6] & (1ULL << (idx0 & 63)), 0u);
+    EXPECT_NE(pb->fb->dirty_mask[idx1 >> 6] & (1ULL << (idx1 & 63)), 0u);
+}
+
+TEST(PixelBuffer, DrawTextClipsAtEdge) {
+    auto pb = PixelBuffer::create(5, 2);
+    // Write text that extends past the right edge — should not crash
+    pb->draw_text(3, 0, "Hello", 255, 255, 255, 0, 0, 0);
+
+    // Only 'H' and 'e' fit (cols 3 and 4)
+    EXPECT_EQ(pb->fb->back[3].ch, static_cast<uint16_t>('H'));
+    EXPECT_EQ(pb->fb->back[4].ch, static_cast<uint16_t>('e'));
+}
+
+TEST(PixelBuffer, DrawTextFlushEmitsAscii) {
+    auto pb = PixelBuffer::create(10, 2);
+    pb->draw_text(0, 0, "X", 255, 0, 0, 0, 0, 0);
+
+    OutputBuffer buf;
+    pb->fb->flush(buf);
+
+    std::string output(buf.view());
+    // The output should contain the character 'X' (not ▀)
+    EXPECT_NE(output.find('X'), std::string::npos);
+    // And should NOT contain the half-block UTF-8
+    EXPECT_EQ(output.find("\xe2\x96\x80"), std::string::npos);
+}
+
 // ── Full pipeline: set → encode → flush ──
 
 TEST(PixelBuffer, FullPipeline) {

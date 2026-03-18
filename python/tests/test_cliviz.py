@@ -56,6 +56,19 @@ def test_fill_rect():
     assert pixels[0, 0, 0] == 0  # outside
 
 
+def test_draw_text():
+    pb = cliviz.PixelBuffer(20, 5)
+    pb.clear(0, 0, 0)
+    pb.draw_text(2, 1, "Hi", 255, 255, 255)
+    # Verify via flush — should not crash and should emit cells
+    # (can't easily inspect cells from Python, but we can verify it doesn't error)
+
+
+def test_draw_text_with_bg():
+    pb = cliviz.PixelBuffer(20, 5)
+    pb.draw_text(0, 0, "AB", 255, 0, 0, 0, 0, 128)
+
+
 def test_terminal_fails_gracefully_in_test():
     t = cliviz.Terminal()
     if not os.isatty(1):

@@ -47,6 +47,13 @@ struct PixelBuffer {
     void fill_rect(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1,
                    uint8_t r, uint8_t g, uint8_t b);
 
+    // Draw text directly into the cell framebuffer at terminal coordinates.
+    // Each character occupies one cell (overwriting the pixel pair at that position).
+    // Clips at the right edge. col/row are 0-based terminal coordinates.
+    void draw_text(uint32_t col, uint32_t row, const char* text,
+                   uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
+                   uint8_t bg_r, uint8_t bg_g, uint8_t bg_b);
+
     ~PixelBuffer();
 
 private:

@@ -122,11 +122,14 @@ uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
 
             color_initialized = true;
 
-            // Emit character
+            // Emit character: glyph table for special chars, direct byte for ASCII
             if (c.ch < GLYPH_COUNT) {
                 buf.emit_char(glyph_table[c.ch].utf8, glyph_table[c.ch].len);
+            } else if (c.ch >= 32 && c.ch < 127) {
+                char ascii = static_cast<char>(c.ch);
+                buf.emit_char(&ascii, 1);
             } else {
-                buf.emit_char(" ", 1); // fallback
+                buf.emit_char(" ", 1);
             }
 
             // Copy to front

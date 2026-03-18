@@ -222,12 +222,11 @@ def main() -> None:
             # GPU renders directly into the pixel buffer's numpy array
             render(pixels, pb.width, pb.height, t, eye_x, eye_y, eye_z)
 
-            cells = pb.flush_full()
-
-            # FPS in terminal title bar (no screen space needed)
+            # HUD overlay — rendered as terminal text on top of pixels
             fps = 1.0 / dt if dt > 0 else 0
-            sys.stdout.buffer.write(f"\x1b]0;cliviz | {fps:.0f}fps | {cells} cells\x07".encode())
-            sys.stdout.buffer.flush()
+            pb.draw_text(1, 0, f"{fps:.0f}fps", 255, 255, 255, 30, 30, 30)
+
+            pb.flush_full()
 
             time.sleep(max(0, 0.016 - (time.monotonic() - now)))
 
