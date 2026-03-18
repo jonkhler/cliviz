@@ -108,31 +108,30 @@ def meta_normal(p: ti.math.vec3, t: float) -> ti.math.vec3:
 @ti.func
 def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     p = uv * 2.0 - 1.0
-    aspect = 1.5
-    p.x *= aspect
 
-    # Camera — orbit around the blobs
+    # Camera — orbit, look slightly down at the blobs
     cam_angle = t * 0.4
-    eye = ti.math.vec3(ti.sin(cam_angle) * 3.5, ti.sin(t * 0.3) * 0.5, ti.cos(cam_angle) * 3.5)
-    fwd = ti.math.normalize(-eye)
+    eye = ti.math.vec3(ti.sin(cam_angle) * 4.0, 2.0, ti.cos(cam_angle) * 4.0)
+    target = ti.math.vec3(0.0, 0.0, 0.0)
+    fwd = ti.math.normalize(target - eye)
     right = ti.math.normalize(ti.math.cross(fwd, ti.math.vec3(0, 1, 0)))
     up = ti.math.cross(right, fwd)
-    rd = ti.math.normalize(fwd + right * p.x + up * p.y * 0.7)
+    rd = ti.math.normalize(fwd + right * p.x * 0.8 + up * p.y * 0.5)
 
-    # Raymarch (metaballs + floor)
+    # Raymarch
     ray_t = 0.0
     hit = False
-    for _ in range(64):
+    for _ in range(80):
         pos = eye + rd * ray_t
         d = sdf_meta_scene(pos, t)
-        if d < 0.005:
+        if d < 0.003:
             hit = True
             break
-        if ray_t > 20.0:
+        if ray_t > 25.0:
             break
         ray_t += d
 
-    col = ti.math.vec3(0.05, 0.02, 0.1)  # visible dark purple background
+    col = ti.math.vec3(0.08, 0.05, 0.15)
     if hit:
         pos = eye + rd * ray_t
         n = meta_normal(pos, t)
@@ -148,16 +147,22 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
         rim = 1.0 - ti.max(ti.math.dot(n, -rd), 0.0)
         rim = ti.pow(rim, 3.0)
 
-        # Iridescent material from normal
-        mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
-                      ti.math.vec3(0.5), ti.math.vec3(0.5),
-                      ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
+        # Floor gets checkerboard, blobs get iridescent material
+        is_floor = 1.0 if pos.y < -1.4 else 0.0
+        if is_floor > 0.5:
+            check = ti.math.mod(ti.floor(pos.x * 2.0) + ti.floor(pos.z * 2.0), 2.0)
+            if check < 0.0:
+                check += 2.0
+            mat = ti.math.vec3(0.15, 0.15, 0.2) if check < 1.0 else ti.math.vec3(0.25, 0.25, 0.3)
+        else:
+            mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
+                          ti.math.vec3(0.5), ti.math.vec3(0.5),
+                          ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
 
-        col = mat * (diff * 0.6 + 0.15) + ti.math.vec3(spec) * 0.8 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.5
+        col = mat * (diff * 0.6 + 0.15) + ti.math.vec3(spec) * 0.8 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.3
 
-        # Fog
-        fog = ti.exp(-ray_t * 0.08)
-        col = col * fog + ti.math.vec3(0.02, 0.01, 0.05) * (1.0 - fog)
+        fog = ti.exp(-ray_t * 0.06)
+        col = col * fog + ti.math.vec3(0.08, 0.05, 0.15) * (1.0 - fog)
     return col
 
 
