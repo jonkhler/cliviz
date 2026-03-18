@@ -20,6 +20,10 @@ dirty propagation from pixel to cell level, encode only dirty regions.
 triangle rasterizer with backface culling, z-buffer, flat shading. Procedural cube
 and icosphere generators. Interactive demo with orbit camera.
 
+**Stage 6.3 — SDF Raymarcher**: Per-pixel signed distance field raymarcher with
+smooth union CSG, diffuse lighting, shadow rays, ambient occlusion, distance fog,
+checkerboard floor. Available as render mode '3' in the demo.
+
 ### Build & run
 ```
 conan install . --output-folder=build --build=missing -s compiler.cppstd=20
@@ -41,12 +45,13 @@ src/
   raster.h/.cpp   — triangle rasterizer, z-buffer, mesh generators
   main.cpp        — spinning cube/sphere demo
 tests/
-  7 test files, 76 tests total
+  sdf.h/.cpp      — SDF raymarcher with lighting
+  8 test files, 84 tests total
 ```
 
 ## Next (plan.md stages not yet done)
 
 - **Stage 2**: SIMD optimization (NEON on ARM, not AVX2)
 - **Stage 4**: Multi-core parallelism (thread pool, row-band partitioning)
-- **Stage 6**: Gouraud shading, textures, SDF raymarcher, color quantization,
-  adaptive quality, input handling improvements
+- **Stage 6 remaining**: Gouraud shading, textures, color quantization,
+  adaptive quality, mouse input, resize handling
