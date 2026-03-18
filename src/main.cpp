@@ -205,13 +205,8 @@ int main() {
             }
         }
 
-        // Frame limiter (~60fps)
-        auto elapsed = Clock::now() - frame_start;
-        auto target = std::chrono::microseconds(16666);
-        if (elapsed < target) {
-            auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(target - elapsed);
-            usleep(static_cast<useconds_t>(remaining.count()));
-        }
+        // No artificial frame limiter — synchronized output (\e[?2026h/l)
+        // lets the terminal handle pacing. This maximizes responsiveness.
     }
 
     term_shutdown();
