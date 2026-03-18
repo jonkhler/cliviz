@@ -220,10 +220,9 @@ TEST(Framebuffer, PerceptualSkipAlwaysEmitsGlyphChange) {
     EXPECT_EQ(emitted, 1u);
 }
 
-// ── Cursor movement optimization ──
-
-TEST(Framebuffer, AdjacentCellsNoCursorJump) {
-    // Two adjacent cells on the same row should not emit a cursor-move between them
+// Cursor position is now always emitted for portability (some terminals
+// treat ▀ as width 2), so we verify each cell gets its own cursor move.
+TEST(Framebuffer, EachCellGetsExplicitCursorPosition) {
     auto fb = Framebuffer::create(10, 1);
     Cell c{{255, 0, 0}, {0, 0, 0}, GLYPH_HALF_UPPER};
     fb->set(0, 0, c);
@@ -233,13 +232,10 @@ TEST(Framebuffer, AdjacentCellsNoCursorJump) {
     fb->flush(buf);
 
     std::string output(buf.view());
-    // Count cursor-position sequences: \x1b[<digits>;<digits>H
-    // Must NOT match other escapes like \x1b[?2026h or color escapes
     size_t cursor_moves = 0;
     size_t pos = 0;
     while ((pos = output.find("\x1b[", pos)) != std::string::npos) {
         size_t start = pos + 2;
-        // A cursor-position escape has only digits and one semicolon before H
         bool valid = true;
         bool has_semi = false;
         size_t i = start;
@@ -256,5 +252,5 @@ TEST(Framebuffer, AdjacentCellsNoCursorJump) {
         }
         pos += 2;
     }
-    EXPECT_EQ(cursor_moves, 1u); // only one cursor-position for the first cell
+    EXPECT_EQ(cursor_moves, 2u);
 }

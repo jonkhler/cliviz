@@ -62,8 +62,6 @@ uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
     uint8_t last_fg[3] = {0, 0, 0};
     uint8_t last_bg[3] = {0, 0, 0};
     bool color_initialized = false;
-    uint32_t cursor_row = UINT32_MAX;
-    uint32_t cursor_col = UINT32_MAX;
 
     for (uint32_t word_idx = 0; word_idx < mask_words; ++word_idx) {
         uint64_t bits = dirty_mask[word_idx];
@@ -97,12 +95,11 @@ uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
             uint32_t row = idx / width;
             uint32_t col = idx % width;
 
-            // Cursor movement: skip if we're already at the right position
-            if (row != cursor_row || col != cursor_col) {
-                // ANSI rows/cols are 1-based
-                buf.emit_cursor_to(static_cast<uint16_t>(row + 1),
-                                   static_cast<uint16_t>(col + 1));
-            }
+            // Always emit cursor position — relying on implicit cursor
+            // advance after character output is fragile across terminals
+            // (some treat ▀ as width 2, breaking the tracking).
+            buf.emit_cursor_to(static_cast<uint16_t>(row + 1),
+                               static_cast<uint16_t>(col + 1));
 
             // Emit fg color if changed
             const Cell& c = back[idx];
@@ -134,10 +131,6 @@ uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
 
             // Copy to front
             front[idx] = back[idx];
-
-            // Advance cursor position (character output moves cursor right by 1)
-            cursor_row = row;
-            cursor_col = col + 1;
 
             ++emitted;
         }
