@@ -42,7 +42,7 @@ inline constexpr auto digit_table = build_digit_table();
 
 // 256KB output buffer, cache-line aligned. Single write() syscall per flush.
 struct OutputBuffer {
-    static constexpr uint32_t CAPACITY = 1u << 18; // 256KB
+    static constexpr uint32_t CAPACITY = 1u << 20; // 1MB
 
     alignas(64) char data[CAPACITY];
     uint32_t len = 0;
