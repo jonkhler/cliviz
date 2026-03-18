@@ -136,37 +136,76 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
             break
         ray_t += d
 
-    col = ti.math.vec3(0.08, 0.05, 0.15)
+    bg_col = ti.math.vec3(0.08, 0.05, 0.15)
+    col = bg_col
     if hit:
         pos = eye + rd * ray_t
         n = meta_normal(pos, t)
-
         light = ti.math.normalize(ti.math.vec3(1.0, 1.5, -1.0))
         diff = ti.max(ti.math.dot(n, light), 0.0)
 
-        # Specular (Blinn-Phong)
         half_v = ti.math.normalize(light - rd)
         spec = ti.pow(ti.max(ti.math.dot(n, half_v), 0.0), 64.0)
 
-        # Rim lighting
         rim = 1.0 - ti.max(ti.math.dot(n, -rd), 0.0)
         rim = ti.pow(rim, 3.0)
 
-        # Material: checkerboard floor vs iridescent blobs
+        # Floor: checkerboard
         check = ti.math.mod(ti.floor(pos.x * 2.0) + ti.floor(pos.z * 2.0), 2.0)
         if check < 0.0:
             check += 2.0
         floor_mat = ti.math.vec3(0.15, 0.15, 0.2) * (1.0 - check * 0.3) + ti.math.vec3(0.25, 0.25, 0.3) * (check * 0.3)
+
+        # Blob: iridescent
         blob_mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
                            ti.math.vec3(0.5), ti.math.vec3(0.5),
                            ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
-        floor_blend = ti.math.clamp((-(pos.y + 1.4)) * 100.0, 0.0, 1.0)
-        mat = blob_mat * (1.0 - floor_blend) + floor_mat * floor_blend
 
-        col = mat * (diff * 0.6 + 0.15) + ti.math.vec3(spec) * 0.8 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.3
+        floor_blend = ti.math.clamp((-(pos.y + 1.4)) * 100.0, 0.0, 1.0)
+        is_blob = 1.0 - floor_blend
+
+        # Glass: first blob gets Fresnel + refraction
+        # Check if we're near the first blob
+        bp0 = ti.math.vec3(ti.sin(t * 0.7) * 1.0, ti.cos(t * 0.5) * 0.7, ti.sin(t * 0.3) * 0.8)
+        dist_to_blob0 = (pos - bp0).norm()
+        glass_amount = ti.math.clamp(1.0 - dist_to_blob0 * 1.5, 0.0, 1.0) * is_blob
+
+        # Fresnel — more reflective at glancing angles
+        fresnel = ti.pow(1.0 - ti.max(ti.math.dot(n, -rd), 0.0), 4.0)
+        fresnel = 0.1 + 0.9 * fresnel
+
+        # Refracted ray — trace through the glass blob
+        refr_col = bg_col
+        if glass_amount > 0.1:
+            eta = 1.0 / 1.45  # glass IOR
+            refr_rd = ti.math.refract(rd, n, eta)
+            # March the refracted ray
+            refr_t = 0.1
+            for _ in range(30):
+                rp = pos + refr_rd * refr_t
+                rd2 = sdf_meta_scene(rp, t)
+                if rd2 < 0.01:
+                    # Hit something through the glass
+                    rn = meta_normal(rp, t)
+                    rdiff = ti.max(ti.math.dot(rn, light), 0.0)
+                    refr_col = floor_mat * (rdiff * 0.5 + 0.2)
+                    break
+                refr_t += ti.max(rd2, 0.05)
+                if refr_t > 8.0:
+                    break
+
+        # Combine: glass blob uses fresnel blend of reflection + refraction
+        opaque_col = blob_mat * (diff * 0.6 + 0.15)
+        glass_col = refr_col * (1.0 - fresnel) + (ti.math.vec3(spec * 1.5) + ti.math.vec3(0.3, 0.5, 0.9) * rim * 0.6) * fresnel
+        mat_col = opaque_col * (1.0 - glass_amount) + glass_col * glass_amount
+        # Floor stays opaque
+        mat = mat_col * (1.0 - floor_blend) + floor_mat * floor_blend
+
+        col = mat * (diff * 0.5 + 0.2) * (1.0 - glass_amount) + mat * glass_amount
+        col += ti.math.vec3(spec) * 0.5 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.2
 
         fog = ti.exp(-ray_t * 0.06)
-        col = col * fog + ti.math.vec3(0.08, 0.05, 0.15) * (1.0 - fog)
+        col = col * fog + bg_col * (1.0 - fog)
     return col
 
 
@@ -174,60 +213,68 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
 
 @ti.func
 def terrain_height(p: ti.math.vec2) -> float:
-    h = ti.sin(p.x * 0.5) * ti.cos(p.y * 0.3) * 0.5
-    h += ti.sin(p.x * 1.3 + p.y * 0.7) * 0.25
-    h += ti.sin(p.x * 3.1 - p.y * 2.3) * 0.1
+    # Multi-octave noise for more interesting terrain
+    h = ti.sin(p.x * 0.3) * ti.cos(p.y * 0.2) * 1.0
+    h += ti.sin(p.x * 0.7 + p.y * 0.5) * 0.5
+    h += ti.sin(p.x * 1.5 - p.y * 1.2) * 0.25
+    h += ti.sin(p.x * 3.1 + p.y * 2.7) * 0.1
     return h
 
 
 @ti.func
 def terrain(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     p = uv * 2.0 - 1.0
-    p.y = -p.y  # flip Y so sky is at top
+    p.y = -p.y
 
-    # Camera — fly forward and gently bob
-    ro = ti.math.vec3(t * 2.0, 2.5 + ti.sin(t * 0.5) * 0.3, t * 1.5)
-    rd = ti.math.normalize(ti.math.vec3(p.x * 0.8, p.y * 0.5 - 0.2, 1.0))
+    # Camera — fly forward, look slightly down
+    ro = ti.math.vec3(t * 1.5, 3.0 + ti.sin(t * 0.3) * 0.5, t * 1.0)
+    rd = ti.math.normalize(ti.math.vec3(p.x * 0.7, p.y * 0.4 - 0.25, 1.0))
 
-    sky_col = ti.math.vec3(0.15, 0.08, 0.25)
+    sky_col = ti.math.vec3(0.25, 0.15, 0.4)
     sun_dir = ti.math.normalize(ti.math.vec3(0.5, 0.8, -0.3))
     col = sky_col
 
-    # Sky gradient
-    sky_t = ti.math.clamp(rd.y * 2.0 + 0.5, 0.0, 1.0)
-    col = sky_col * (1.0 - sky_t) + ti.math.vec3(0.3, 0.15, 0.4) * sky_t
+    # Sky gradient with warm horizon
+    sky_t = ti.math.clamp(rd.y * 3.0 + 0.3, 0.0, 1.0)
+    horizon = ti.math.vec3(0.6, 0.3, 0.2)
+    col = horizon * (1.0 - sky_t) + sky_col * sky_t
 
-    # Raymarch terrain — smaller steps for cleaner horizon
+    # Fixed-step terrain march — uniform steps avoid horizon artifacts
     hit_t = 0.0
-    for _ in range(120):
+    prev_d = 1e10
+    dt_step = 0.15  # fixed step size
+    for _ in range(200):
         pos = ro + rd * hit_t
         h = terrain_height(ti.math.vec2(pos.x, pos.z))
         d = pos.y - h
-        if d < 0.005:
-            n_eps = 0.05
+        # Crossed the surface (sign change) — interpolate for smooth hit
+        if d < 0.0:
+            # Interpolate back to surface
+            hit_t -= dt_step * d / (d - prev_d + 0.0001)
+            pos = ro + rd * hit_t
+            h = terrain_height(ti.math.vec2(pos.x, pos.z))
+
+            n_eps = 0.02
             nx = terrain_height(ti.math.vec2(pos.x + n_eps, pos.z)) - terrain_height(ti.math.vec2(pos.x - n_eps, pos.z))
             nz = terrain_height(ti.math.vec2(pos.x, pos.z + n_eps)) - terrain_height(ti.math.vec2(pos.x, pos.z - n_eps))
             normal = ti.math.normalize(ti.math.vec3(-nx, 2.0 * n_eps, -nz))
 
             diff = ti.max(ti.math.dot(normal, sun_dir), 0.0)
-
-            # Specular water-like sheen
             half_v = ti.math.normalize(sun_dir - rd)
             spec = ti.pow(ti.max(ti.math.dot(normal, half_v), 0.0), 32.0)
 
-            # Height-based color: deep=water blue, mid=green, high=snow
-            terrain_col = palette(h * 0.3 + 0.5,
-                                  ti.math.vec3(0.15, 0.3, 0.1), ti.math.vec3(0.3, 0.3, 0.2),
-                                  ti.math.vec3(1.0, 0.8, 0.5), ti.math.vec3(0.0, 0.1, 0.2))
+            terrain_col = palette(h * 0.15 + 0.5,
+                                  ti.math.vec3(0.2, 0.35, 0.1), ti.math.vec3(0.25, 0.3, 0.15),
+                                  ti.math.vec3(1.0, 0.8, 0.5), ti.math.vec3(0.0, 0.1, 0.15))
 
-            col = terrain_col * (diff * 0.7 + 0.2) + ti.math.vec3(1.0, 0.9, 0.7) * spec * 0.4
+            col = terrain_col * (diff * 0.7 + 0.25) + ti.math.vec3(1.0, 0.9, 0.7) * spec * 0.3
 
-            # Distance fog — heavier to hide horizon artifacts
-            fog = ti.exp(-hit_t * 0.04)
-            col = col * fog + sky_col * (1.0 - fog)
+            fog = ti.exp(-hit_t * 0.05)
+            col = col * fog + horizon * (1.0 - fog)
             break
-        hit_t += ti.max(d * 0.4, 0.05)
-        if hit_t > 40.0:
+        prev_d = d
+        hit_t += dt_step
+        if hit_t > 30.0:
             break
 
     # Sun disc + halo
