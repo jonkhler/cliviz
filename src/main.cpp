@@ -1,0 +1,163 @@
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <poll.h>
+#include <unistd.h>
+
+#include "math3d.h"
+#include "outbuf.h"
+#include "pixbuf.h"
+#include "raster.h"
+#include "term.h"
+
+using namespace cliviz;
+using Clock = std::chrono::steady_clock;
+
+namespace {
+
+struct Camera {
+    float yaw = 0.0f;
+    float pitch = 0.3f;
+    float distance = 4.0f;
+
+    mat4 view_matrix() const {
+        float cx = std::cos(pitch), sx = std::sin(pitch);
+        float cy = std::cos(yaw), sy = std::sin(yaw);
+        vec3 eye{
+            distance * cx * sy,
+            distance * sx,
+            distance * cx * cy,
+        };
+        return mat4::look_at(eye, {0, 0, 0}, {0, 1, 0});
+    }
+};
+
+// Non-blocking stdin read. Returns 0 if no input available.
+int read_key() {
+    struct pollfd pfd{STDIN_FILENO, POLLIN, 0};
+    if (poll(&pfd, 1, 0) <= 0) return 0;
+    char c = 0;
+    if (read(STDIN_FILENO, &c, 1) != 1) return 0;
+
+    if (c == '\x1b') {
+        // Escape sequence
+        char seq[2];
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+        if (seq[0] == '[') {
+            switch (seq[1]) {
+            case 'A': return 'k'; // up
+            case 'B': return 'j'; // down
+            case 'C': return 'l'; // right
+            case 'D': return 'h'; // left
+            }
+        }
+        return '\x1b';
+    }
+    return c;
+}
+
+} // namespace
+
+int main() {
+    if (!term_init()) {
+        std::fprintf(stderr, "Failed to initialize terminal (not a TTY?)\n");
+        return 1;
+    }
+
+    TermSize ts = term_get_size();
+    if (ts.cols == 0 || ts.rows == 0) {
+        term_shutdown();
+        std::fprintf(stderr, "Cannot determine terminal size\n");
+        return 1;
+    }
+
+    auto pb = PixelBuffer::create(ts.cols, ts.rows - 1); // leave 1 row for status
+    ZBuffer zb(pb->width, pb->height);
+    OutputBuffer outbuf;
+
+    Mesh cube = make_cube();
+    Mesh sphere = make_icosphere(2);
+    Mesh* active_mesh = &cube;
+
+    Camera cam;
+    float aspect = static_cast<float>(pb->width) / static_cast<float>(pb->height);
+    mat4 proj = mat4::perspective(static_cast<float>(M_PI / 3.0), aspect, 0.1f, 100.0f);
+
+    float angle = 0.0f;
+    bool auto_rotate = true;
+    bool running = true;
+
+    auto last_frame = Clock::now();
+
+    while (running) {
+        auto frame_start = Clock::now();
+        float dt = std::chrono::duration<float>(frame_start - last_frame).count();
+        last_frame = frame_start;
+
+        // Input
+        int key = read_key();
+        switch (key) {
+        case 'q': case '\x1b': running = false; break;
+        case 'h': case 'a': cam.yaw -= 0.1f; break;
+        case 'l': case 'd': cam.yaw += 0.1f; break;
+        case 'k': case 'w': cam.pitch += 0.05f; break;
+        case 'j': case 's': cam.pitch -= 0.05f; break;
+        case '+': case '=': cam.distance = std::max(1.5f, cam.distance - 0.3f); break;
+        case '-': cam.distance = std::min(20.0f, cam.distance + 0.3f); break;
+        case ' ': auto_rotate = !auto_rotate; break;
+        case '1': active_mesh = &cube; break;
+        case '2': active_mesh = &sphere; break;
+        default: break;
+        }
+
+        cam.pitch = std::clamp(cam.pitch, -1.4f, 1.4f);
+
+        if (auto_rotate) {
+            angle += dt * 0.8f;
+        }
+
+        // Render
+        pb->clear(15, 15, 25); // dark blue background
+        zb.clear();
+
+        mat4 model = mat4::rotate_y(angle) * mat4::rotate_x(angle * 0.3f);
+        mat4 mvp = proj * cam.view_matrix() * model;
+
+        uint32_t tris_drawn = rasterize(*active_mesh, mvp, *pb, zb);
+        pb->encode();
+
+        outbuf.clear();
+        uint32_t cells_emitted = pb->fb->flush(outbuf);
+
+        // Status bar
+        auto frame_end = Clock::now();
+        float frame_ms = std::chrono::duration<float, std::milli>(frame_end - frame_start).count();
+        float fps = dt > 0 ? 1.0f / dt : 0.0f;
+
+        outbuf.emit_cursor_to(ts.rows, 1);
+        outbuf.append("\x1b[0m\x1b[7m", 8); // reset + inverse
+        char status[128];
+        int n = std::snprintf(status, sizeof(status),
+            " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD/arrows:cam +-:zoom 1/2:mesh q:quit ",
+            active_mesh == &cube ? "cube" : "sphere",
+            tris_drawn, cells_emitted, frame_ms, fps);
+        // Pad to terminal width
+        for (int i = n; i < ts.cols; ++i) status[i] = ' ';
+        outbuf.append(status, static_cast<uint32_t>(std::min(static_cast<int>(ts.cols), static_cast<int>(sizeof(status)))));
+        outbuf.append("\x1b[0m", 4); // reset
+
+        outbuf.flush();
+
+        // Frame limiter (~60fps)
+        auto elapsed = Clock::now() - frame_start;
+        auto target = std::chrono::microseconds(16666);
+        if (elapsed < target) {
+            auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(target - elapsed);
+            usleep(static_cast<useconds_t>(remaining.count()));
+        }
+    }
+
+    term_shutdown();
+    return 0;
+}
