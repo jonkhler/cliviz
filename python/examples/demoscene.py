@@ -147,17 +147,16 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
         rim = 1.0 - ti.max(ti.math.dot(n, -rd), 0.0)
         rim = ti.pow(rim, 3.0)
 
-        # Floor gets checkerboard, blobs get iridescent material
-        is_floor = 1.0 if pos.y < -1.4 else 0.0
-        if is_floor > 0.5:
-            check = ti.math.mod(ti.floor(pos.x * 2.0) + ti.floor(pos.z * 2.0), 2.0)
-            if check < 0.0:
-                check += 2.0
-            mat = ti.math.vec3(0.15, 0.15, 0.2) if check < 1.0 else ti.math.vec3(0.25, 0.25, 0.3)
-        else:
-            mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
-                          ti.math.vec3(0.5), ti.math.vec3(0.5),
-                          ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
+        # Material: checkerboard floor vs iridescent blobs
+        check = ti.math.mod(ti.floor(pos.x * 2.0) + ti.floor(pos.z * 2.0), 2.0)
+        if check < 0.0:
+            check += 2.0
+        floor_mat = ti.math.vec3(0.15, 0.15, 0.2) * (1.0 - check * 0.3) + ti.math.vec3(0.25, 0.25, 0.3) * (check * 0.3)
+        blob_mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
+                           ti.math.vec3(0.5), ti.math.vec3(0.5),
+                           ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
+        floor_blend = ti.math.clamp((-(pos.y + 1.4)) * 100.0, 0.0, 1.0)
+        mat = blob_mat * (1.0 - floor_blend) + floor_mat * floor_blend
 
         col = mat * (diff * 0.6 + 0.15) + ti.math.vec3(spec) * 0.8 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.3
 
