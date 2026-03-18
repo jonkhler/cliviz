@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <set>
 
 #include "raster.h"
 
@@ -87,6 +88,44 @@ TEST(Rasterizer, BackfaceCullingReducesOutput) {
     // We just verify the culled version draws fewer triangles
     EXPECT_GT(drawn_with_cull, 0u);
     EXPECT_LE(drawn_with_cull, 12u);
+}
+
+TEST(Mesh, IcosphereHasGouraudData) {
+    auto mesh = make_icosphere(1);
+    EXPECT_TRUE(mesh.has_gouraud());
+    EXPECT_EQ(mesh.normals.size(), mesh.n_verts);
+    EXPECT_EQ(mesh.vertex_colors.size(), mesh.n_verts);
+}
+
+TEST(Rasterizer, GouraudShadingProducesGradients) {
+    // Render icosphere with Gouraud — pixels should vary in color
+    // (unlike flat shading where each face is solid)
+    auto pb = PixelBuffer::create(40, 20);
+    ZBuffer zb(pb->width, pb->height);
+    auto mesh = make_icosphere(2);
+
+    mat4 view = mat4::look_at({0, 0, 3}, {0, 0, 0}, {0, 1, 0});
+    float aspect = static_cast<float>(pb->width) / static_cast<float>(pb->height);
+    mat4 proj = mat4::perspective(static_cast<float>(M_PI / 3.0), aspect, 0.1f, 100.0f);
+
+    pb->clear(0, 0, 0);
+    zb.clear();
+    rasterize(mesh, proj * view, *pb, zb);
+
+    // Count distinct colors in the rendered pixels (non-black)
+    std::set<uint32_t> colors;
+    for (uint32_t y = 0; y < pb->height; ++y) {
+        for (uint32_t x = 0; x < pb->width; ++x) {
+            uint32_t idx = (y * pb->width + x) * 3;
+            uint8_t r = pb->pixels[idx], g = pb->pixels[idx + 1], b = pb->pixels[idx + 2];
+            if (r > 0 || g > 0 || b > 0) {
+                colors.insert((static_cast<uint32_t>(r) << 16) |
+                              (static_cast<uint32_t>(g) << 8) | b);
+            }
+        }
+    }
+    // Gouraud should produce many distinct colors (smooth gradients)
+    EXPECT_GT(colors.size(), 20u);
 }
 
 TEST(Rasterizer, ZBufferPreventsOverdraw) {

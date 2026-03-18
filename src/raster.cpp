@@ -87,7 +87,21 @@ Mesh make_icosphere(uint32_t subdivisions) {
     m.n_verts = static_cast<uint32_t>(m.positions.size());
     m.n_tris = static_cast<uint32_t>(m.indices.size()) / 3;
 
-    // Per-face colors based on face normal
+    // Per-vertex normals (on a unit sphere, normal == position)
+    m.normals.resize(m.n_verts);
+    m.vertex_colors.resize(m.n_verts);
+    for (uint32_t i = 0; i < m.n_verts; ++i) {
+        m.normals[i] = normalize(m.positions[i]);
+        // Material color from normal direction
+        vec3 n = m.normals[i];
+        m.vertex_colors[i] = {
+            std::abs(n.x) * 0.5f + 0.5f,
+            std::abs(n.y) * 0.5f + 0.5f,
+            std::abs(n.z) * 0.5f + 0.5f,
+        };
+    }
+
+    // Per-face colors (fallback for flat mode)
     m.colors.resize(m.n_tris);
     for (uint32_t i = 0; i < m.n_tris; ++i) {
         vec3 center = (m.positions[m.indices[i * 3]] +
@@ -118,7 +132,8 @@ inline float edge_fn(float v0x, float v0y, float v1x, float v1y, float px, float
 } // namespace
 
 uint32_t rasterize(const Mesh& mesh, const mat4& mvp,
-                   PixelBuffer& pb, ZBuffer& zb) {
+                   PixelBuffer& pb, ZBuffer& zb,
+                   const Light& light) {
     auto w = static_cast<float>(pb.width);
     auto h = static_cast<float>(pb.height);
     float half_w = w * 0.5f;
@@ -165,11 +180,17 @@ uint32_t rasterize(const Mesh& mesh, const mat4& mvp,
 
         if (min_x > max_x || min_y > max_y) continue;
 
-        // Face color
-        const vec3& col = mesh.colors[tri];
-        auto r = static_cast<uint8_t>(std::clamp(col.x * 255.0f, 0.0f, 255.0f));
-        auto g = static_cast<uint8_t>(std::clamp(col.y * 255.0f, 0.0f, 255.0f));
-        auto b = static_cast<uint8_t>(std::clamp(col.z * 255.0f, 0.0f, 255.0f));
+        bool gouraud = mesh.has_gouraud();
+        vec3 light_dir = normalize(light.direction);
+
+        // Flat shading fallback color
+        uint8_t flat_r = 0, flat_g = 0, flat_b = 0;
+        if (!gouraud) {
+            const vec3& col = mesh.colors[tri];
+            flat_r = static_cast<uint8_t>(std::clamp(col.x * 255.0f, 0.0f, 255.0f));
+            flat_g = static_cast<uint8_t>(std::clamp(col.y * 255.0f, 0.0f, 255.0f));
+            flat_b = static_cast<uint8_t>(std::clamp(col.z * 255.0f, 0.0f, 255.0f));
+        }
 
         // Rasterize
         for (float py = min_y + 0.5f; py <= max_y + 0.5f; py += 1.0f) {
@@ -180,7 +201,6 @@ uint32_t rasterize(const Mesh& mesh, const mat4& mvp,
 
                 if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;
 
-                // Barycentric coords for depth interpolation
                 float b0 = w0 * inv_area;
                 float b1 = w1 * inv_area;
                 float b2 = w2 * inv_area;
@@ -190,7 +210,26 @@ uint32_t rasterize(const Mesh& mesh, const mat4& mvp,
                 auto iy = static_cast<uint32_t>(py);
 
                 if (ix < pb.width && iy < pb.height && zb.test_and_set(ix, iy, z)) {
-                    pb.set(ix, iy, r, g, b);
+                    if (gouraud) {
+                        // Interpolate normal
+                        vec3 n = normalize(
+                            mesh.normals[i0] * b0 +
+                            mesh.normals[i1] * b1 +
+                            mesh.normals[i2] * b2);
+                        // Interpolate vertex color
+                        vec3 vc = mesh.vertex_colors[i0] * b0 +
+                                  mesh.vertex_colors[i1] * b1 +
+                                  mesh.vertex_colors[i2] * b2;
+                        // Diffuse + ambient
+                        float diff = std::max(dot(n, light_dir), 0.0f);
+                        vec3 col = vc * (light.color * diff + light.color * light.ambient);
+                        pb.set(ix, iy,
+                            static_cast<uint8_t>(std::clamp(col.x * 255.0f, 0.0f, 255.0f)),
+                            static_cast<uint8_t>(std::clamp(col.y * 255.0f, 0.0f, 255.0f)),
+                            static_cast<uint8_t>(std::clamp(col.z * 255.0f, 0.0f, 255.0f)));
+                    } else {
+                        pb.set(ix, iy, flat_r, flat_g, flat_b);
+                    }
                 }
             }
         }

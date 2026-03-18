@@ -15,8 +15,12 @@ struct Mesh {
     std::vector<vec3> positions;
     std::vector<uint32_t> indices; // 3 per triangle
     std::vector<vec3> colors;     // per-face color (RGB, 0-1 range)
+    std::vector<vec3> normals;    // per-vertex normals (optional, enables Gouraud)
+    std::vector<vec3> vertex_colors; // per-vertex colors (optional)
     uint32_t n_verts = 0;
     uint32_t n_tris = 0;
+
+    bool has_gouraud() const { return !normals.empty(); }
 };
 
 // Procedural mesh generators
@@ -44,9 +48,17 @@ struct ZBuffer {
     }
 };
 
+// Light for Gouraud shading
+struct Light {
+    vec3 direction{-0.5f, 0.8f, 0.6f}; // toward light
+    vec3 color{1.0f, 0.95f, 0.9f};
+    float ambient = 0.15f;
+};
+
 // Rasterize mesh into pixel buffer with z-testing.
 // Returns number of triangles drawn (after backface culling).
 uint32_t rasterize(const Mesh& mesh, const mat4& mvp,
-                   PixelBuffer& pb, ZBuffer& zb);
+                   PixelBuffer& pb, ZBuffer& zb,
+                   const Light& light = {});
 
 } // namespace cliviz
