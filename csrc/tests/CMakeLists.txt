@@ -4,11 +4,6 @@ add_executable(cliviz_tests
     cell_test.cpp
     framebuf_test.cpp
     pixbuf_test.cpp
-    math3d_test.cpp
-    raster_test.cpp
-    sdf_test.cpp
-    threadpool_test.cpp
-    capi_test.cpp
     integration_test.cpp
 )
 

@@ -8,31 +8,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
-# ── Library (static + shared) ──
+# ── Core library: terminal renderer ──
 
-set(CLIVIZ_SOURCES
+add_library(cliviz_static STATIC
     csrc/src/term.cpp
     csrc/src/framebuf.cpp
     csrc/src/pixbuf.cpp
-    csrc/src/raster.cpp
-    csrc/src/sdf.cpp
-    csrc/src/threadpool.cpp
-    csrc/src/cliviz_api.cpp
 )
-
-add_library(cliviz_static STATIC ${CLIVIZ_SOURCES})
 target_include_directories(cliviz_static PUBLIC csrc/include/cliviz csrc/include)
-
-add_library(cliviz_shared SHARED ${CLIVIZ_SOURCES})
-target_include_directories(cliviz_shared PUBLIC csrc/include/cliviz csrc/include)
-set_target_properties(cliviz_shared PROPERTIES OUTPUT_NAME cliviz)
-
-# ── Demo example (skip when building Python wheel) ──
-
-if(NOT SKBUILD)
-    add_executable(cliviz_demo csrc/examples/demo.cpp)
-    target_link_libraries(cliviz_demo PRIVATE cliviz_static)
-endif()
 
 # ── Tests (FetchContent for GTest, skip during wheel build) ──
 
@@ -68,9 +51,7 @@ endif()
 # ── Install ──
 
 include(GNUInstallDirs)
-install(TARGETS cliviz_static cliviz_shared
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+install(TARGETS cliviz_static
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 install(DIRECTORY csrc/include/cliviz/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cliviz)
-install(FILES csrc/include/cliviz.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
