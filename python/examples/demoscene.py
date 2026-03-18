@@ -78,11 +78,11 @@ def sdf_metaballs(p: ti.math.vec3, t: float) -> float:
     for i in range(5):
         fi = float(i)
         bp = ti.math.vec3(
-            ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 1.2,
-            ti.cos(t * (0.5 + fi * 0.17) + fi * 2.1) * 0.8,
-            ti.sin(t * (0.3 + fi * 0.19) + fi * 0.7) * 1.0,
+            ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 1.0,
+            ti.cos(t * (0.5 + fi * 0.17) + fi * 2.1) * 0.7,
+            ti.sin(t * (0.3 + fi * 0.19) + fi * 0.7) * 0.8,
         )
-        sd = (p - bp).norm() - 0.5
+        sd = (p - bp).norm() - (0.4 + 0.1 * ti.sin(t + fi))
         # Smooth union
         k = 0.6
         h = ti.math.clamp(0.5 + 0.5 * (d - sd) / k, 0.0, 1.0)
@@ -96,9 +96,13 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     aspect = 1.5
     p.x *= aspect
 
-    # Camera
-    eye = ti.math.vec3(0, 0, -4.0)
-    rd = ti.math.normalize(ti.math.vec3(p.x, p.y, 2.0))
+    # Camera — orbit around the blobs
+    cam_angle = t * 0.4
+    eye = ti.math.vec3(ti.sin(cam_angle) * 3.5, ti.sin(t * 0.3) * 0.5, ti.cos(cam_angle) * 3.5)
+    fwd = ti.math.normalize(-eye)
+    right = ti.math.normalize(ti.math.cross(fwd, ti.math.vec3(0, 1, 0)))
+    up = ti.math.cross(right, fwd)
+    rd = ti.math.normalize(fwd + right * p.x + up * p.y * 0.7)
 
     # Raymarch
     ray_t = 0.0
@@ -174,13 +178,13 @@ def terrain(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     sky_t = ti.math.clamp(rd.y * 2.0 + 0.5, 0.0, 1.0)
     col = sky_col * (1.0 - sky_t) + ti.math.vec3(0.3, 0.15, 0.4) * sky_t
 
-    # Raymarch terrain
+    # Raymarch terrain — smaller steps for cleaner horizon
     hit_t = 0.0
-    for _ in range(80):
+    for _ in range(120):
         pos = ro + rd * hit_t
         h = terrain_height(ti.math.vec2(pos.x, pos.z))
         d = pos.y - h
-        if d < 0.01:
+        if d < 0.005:
             n_eps = 0.05
             nx = terrain_height(ti.math.vec2(pos.x + n_eps, pos.z)) - terrain_height(ti.math.vec2(pos.x - n_eps, pos.z))
             nz = terrain_height(ti.math.vec2(pos.x, pos.z + n_eps)) - terrain_height(ti.math.vec2(pos.x, pos.z - n_eps))
@@ -199,12 +203,12 @@ def terrain(uv: ti.math.vec2, t: float) -> ti.math.vec3:
 
             col = terrain_col * (diff * 0.7 + 0.2) + ti.math.vec3(1.0, 0.9, 0.7) * spec * 0.4
 
-            # Distance fog blending into sky
-            fog = ti.exp(-hit_t * 0.025)
+            # Distance fog — heavier to hide horizon artifacts
+            fog = ti.exp(-hit_t * 0.04)
             col = col * fog + sky_col * (1.0 - fog)
             break
-        hit_t += ti.max(d * 0.5, 0.1)
-        if hit_t > 60.0:
+        hit_t += ti.max(d * 0.4, 0.05)
+        if hit_t > 40.0:
             break
 
     # Sun disc + halo
