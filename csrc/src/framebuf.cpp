@@ -145,4 +145,48 @@ uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
     return emitted;
 }
 
+uint32_t Framebuffer::flush_nodiff(OutputBuffer& buf) {
+    buf.emit_sync_start();
+
+    uint8_t last_fg[3] = {0, 0, 0};
+    uint8_t last_bg[3] = {0, 0, 0};
+    bool color_initialized = false;
+
+    for (uint32_t idx = 0; idx < cell_count; ++idx) {
+        uint32_t row = idx / width;
+        uint32_t col = idx % width;
+
+        buf.emit_cursor_to(static_cast<uint16_t>(row + 1),
+                           static_cast<uint16_t>(col + 1));
+
+        const Cell& c = back[idx];
+        if (!color_initialized ||
+            c.fg[0] != last_fg[0] || c.fg[1] != last_fg[1] || c.fg[2] != last_fg[2]) {
+            buf.emit_fg(c.fg[0], c.fg[1], c.fg[2]);
+            last_fg[0] = c.fg[0]; last_fg[1] = c.fg[1]; last_fg[2] = c.fg[2];
+        }
+        if (!color_initialized ||
+            c.bg[0] != last_bg[0] || c.bg[1] != last_bg[1] || c.bg[2] != last_bg[2]) {
+            buf.emit_bg(c.bg[0], c.bg[1], c.bg[2]);
+            last_bg[0] = c.bg[0]; last_bg[1] = c.bg[1]; last_bg[2] = c.bg[2];
+        }
+        color_initialized = true;
+
+        if (c.ch < GLYPH_COUNT) {
+            buf.emit_char(glyph_table[c.ch].utf8, glyph_table[c.ch].len);
+        } else if (c.ch >= 32 && c.ch < 127) {
+            char ascii = static_cast<char>(c.ch);
+            buf.emit_char(&ascii, 1);
+        } else {
+            buf.emit_char(" ", 1);
+        }
+
+        front[idx] = back[idx];
+    }
+
+    buf.emit_sync_end();
+    clear_dirty();
+    return cell_count;
+}
+
 } // namespace cliviz

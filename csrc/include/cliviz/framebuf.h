@@ -37,6 +37,10 @@ struct Framebuffer {
     // this value (perceptual delta skip). 0 = exact comparison (default).
     uint32_t flush(OutputBuffer& buf, uint8_t color_threshold = 0);
 
+    // Emit every cell unconditionally (no diff). Use for full-frame redraws
+    // where every pixel changed (e.g., plasma, SDF).
+    uint32_t flush_nodiff(OutputBuffer& buf);
+
     // Mark all cells dirty (for full redraws).
     void mark_all_dirty();
 
