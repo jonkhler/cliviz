@@ -222,7 +222,12 @@ def main() -> None:
             # GPU renders directly into the pixel buffer's numpy array
             render(pixels, pb.width, pb.height, t, eye_x, eye_y, eye_z)
 
-            pb.flush_full()
+            cells = pb.flush_full()
+
+            # FPS in terminal title bar (no screen space needed)
+            fps = 1.0 / dt if dt > 0 else 0
+            sys.stdout.buffer.write(f"\x1b]0;cliviz | {fps:.0f}fps | {cells} cells\x07".encode())
+            sys.stdout.buffer.flush()
 
             time.sleep(max(0, 0.016 - (time.monotonic() - now)))
 
