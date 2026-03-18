@@ -117,6 +117,21 @@ int main() {
 
         cam.pitch = std::clamp(cam.pitch, -1.4f, 1.4f);
 
+        // Handle terminal resize
+        if (term_was_resized()) {
+            ts = term_get_size();
+            if (ts.cols > 0 && ts.rows > 1) {
+                pb = PixelBuffer::create(ts.cols, ts.rows - 1);
+                zb = ZBuffer(pb->width, pb->height);
+                aspect = static_cast<float>(pb->width) / static_cast<float>(pb->height);
+                proj = mat4::perspective(static_cast<float>(M_PI / 3.0), aspect, 0.1f, 100.0f);
+                // Clear screen after resize
+                outbuf.clear();
+                outbuf.append("\x1b[2J", 4);
+                outbuf.flush();
+            }
+        }
+
         if (auto_rotate) {
             angle += dt * 0.8f;
         }

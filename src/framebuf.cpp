@@ -55,7 +55,7 @@ void Framebuffer::clear_dirty() {
     std::memset(dirty_mask, 0, mask_words * sizeof(uint64_t));
 }
 
-uint32_t Framebuffer::flush(OutputBuffer& buf) {
+uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
     buf.emit_sync_start();
 
     uint32_t emitted = 0;
@@ -77,6 +77,22 @@ uint32_t Framebuffer::flush(OutputBuffer& buf) {
 
             // Confirm actual change (skip false dirty)
             if (back[idx] == front[idx]) continue;
+
+            // Perceptual delta skip: if only colors changed by < threshold, skip
+            if (color_threshold > 0 && back[idx].ch == front[idx].ch) {
+                auto abs_diff = [](uint8_t a, uint8_t b) -> uint8_t {
+                    return a > b ? static_cast<uint8_t>(a - b) : static_cast<uint8_t>(b - a);
+                };
+                bool small_change = true;
+                for (int ch = 0; ch < 3; ++ch) {
+                    if (abs_diff(back[idx].fg[ch], front[idx].fg[ch]) >= color_threshold ||
+                        abs_diff(back[idx].bg[ch], front[idx].bg[ch]) >= color_threshold) {
+                        small_change = false;
+                        break;
+                    }
+                }
+                if (small_change) continue;
+            }
 
             uint32_t row = idx / width;
             uint32_t col = idx % width;

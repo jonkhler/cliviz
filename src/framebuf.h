@@ -33,7 +33,9 @@ struct Framebuffer {
 
     // Diff back vs front, emit minimal ANSI to the output buffer, swap.
     // Returns the number of cells actually emitted.
-    uint32_t flush(OutputBuffer& buf);
+    // color_threshold: skip cells where all RGB channels differ by less than
+    // this value (perceptual delta skip). 0 = exact comparison (default).
+    uint32_t flush(OutputBuffer& buf, uint8_t color_threshold = 0);
 
     // Mark all cells dirty (for full redraws).
     void mark_all_dirty();

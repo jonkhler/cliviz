@@ -167,6 +167,59 @@ TEST(Framebuffer, MarkAllDirty) {
     EXPECT_EQ(emitted, 50u); // all cells changed
 }
 
+// ── Perceptual delta skip ──
+
+TEST(Framebuffer, PerceptualSkipIgnoresSmallChanges) {
+    auto fb = Framebuffer::create(4, 2);
+    Cell c1{{100, 100, 100}, {50, 50, 50}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c1);
+
+    OutputBuffer buf;
+    fb->flush(buf);
+
+    // Now change by a small delta (below threshold of 4)
+    Cell c2{{102, 101, 100}, {51, 50, 49}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c2);
+
+    buf.clear();
+    uint32_t emitted = fb->flush(buf, 4);
+    EXPECT_EQ(emitted, 0u); // skipped due to perceptual threshold
+}
+
+TEST(Framebuffer, PerceptualSkipEmitsLargeChanges) {
+    auto fb = Framebuffer::create(4, 2);
+    Cell c1{{100, 100, 100}, {50, 50, 50}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c1);
+
+    OutputBuffer buf;
+    fb->flush(buf);
+
+    // Change by a larger delta (above threshold)
+    Cell c2{{110, 100, 100}, {50, 50, 50}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c2);
+
+    buf.clear();
+    uint32_t emitted = fb->flush(buf, 4);
+    EXPECT_EQ(emitted, 1u);
+}
+
+TEST(Framebuffer, PerceptualSkipAlwaysEmitsGlyphChange) {
+    auto fb = Framebuffer::create(4, 2);
+    Cell c1{{100, 100, 100}, {50, 50, 50}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c1);
+
+    OutputBuffer buf;
+    fb->flush(buf);
+
+    // Same colors but different glyph — must emit
+    Cell c2{{100, 100, 100}, {50, 50, 50}, GLYPH_HALF_LOWER};
+    fb->set(0, 0, c2);
+
+    buf.clear();
+    uint32_t emitted = fb->flush(buf, 4);
+    EXPECT_EQ(emitted, 1u);
+}
+
 // ── Cursor movement optimization ──
 
 TEST(Framebuffer, AdjacentCellsNoCursorJump) {

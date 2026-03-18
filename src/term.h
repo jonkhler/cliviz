@@ -23,4 +23,8 @@ void term_shutdown();
 // True after successful term_init(), false after term_shutdown().
 bool term_is_active();
 
+// Returns true if the terminal was resized since the last call.
+// Cleared after each call (edge-triggered).
+bool term_was_resized();
+
 } // namespace cliviz

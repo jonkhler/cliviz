@@ -13,8 +13,10 @@ namespace cliviz {
 namespace {
 
 bool g_active = false;
+volatile sig_atomic_t g_resized = 0;
 struct termios g_orig_termios{};
-OutputBuffer g_init_buf; // used only for init/shutdown escapes
+
+void winch_handler(int /*sig*/) { g_resized = 1; }
 
 void restore_terminal() {
     if (!g_active) return;
@@ -70,6 +72,7 @@ bool term_init() {
     std::atexit(restore_terminal);
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
+    std::signal(SIGWINCH, winch_handler);
 
     // Enter alternate screen, hide cursor
     constexpr const char* init_seq =
@@ -86,5 +89,13 @@ bool term_init() {
 void term_shutdown() { restore_terminal(); }
 
 bool term_is_active() { return g_active; }
+
+bool term_was_resized() {
+    if (g_resized) {
+        g_resized = 0;
+        return true;
+    }
+    return false;
+}
 
 } // namespace cliviz
