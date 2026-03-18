@@ -5,9 +5,12 @@ add_executable(cliviz_tests
     cell_test.cpp
     framebuf_test.cpp
     pixbuf_test.cpp
+    math3d_test.cpp
+    raster_test.cpp
     ${CMAKE_SOURCE_DIR}/src/term.cpp
     ${CMAKE_SOURCE_DIR}/src/framebuf.cpp
     ${CMAKE_SOURCE_DIR}/src/pixbuf.cpp
+    ${CMAKE_SOURCE_DIR}/src/raster.cpp
 )
 
 target_include_directories(cliviz_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
