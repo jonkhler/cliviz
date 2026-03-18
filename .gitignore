@@ -1,2 +1,7 @@
 build/
 CMakeUserPresets.json
+python/.venv/
+python/build/
+python/*.egg-info/
+__pycache__/
+.pytest_cache/
