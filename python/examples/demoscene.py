@@ -73,9 +73,17 @@ def tunnel(uv: ti.math.vec2, t: float) -> ti.math.vec3:
 # ── Effect 2: 3D Raymarched Metaballs ──
 
 @ti.func
+def smooth_min(a: float, b: float, k: float) -> float:
+    h = ti.math.clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
+    return b * (1.0 - h) + a * h - k * h * (1.0 - h)
+
+
+@ti.func
 def sdf_metaballs(p: ti.math.vec3, t: float) -> float:
-    d = 1e10
-    for i in range(5):
+    # First blob — initialize d properly (not 1e10 which breaks smooth union)
+    bp0 = ti.math.vec3(ti.sin(t * 0.7) * 1.0, ti.cos(t * 0.5) * 0.7, ti.sin(t * 0.3) * 0.8)
+    d = (p - bp0).norm() - 0.5
+    for i in range(1, 5):
         fi = float(i)
         bp = ti.math.vec3(
             ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 1.0,
@@ -83,10 +91,7 @@ def sdf_metaballs(p: ti.math.vec3, t: float) -> float:
             ti.sin(t * (0.3 + fi * 0.19) + fi * 0.7) * 0.8,
         )
         sd = (p - bp).norm() - (0.4 + 0.1 * ti.sin(t + fi))
-        # Smooth union
-        k = 0.6
-        h = ti.math.clamp(0.5 + 0.5 * (d - sd) / k, 0.0, 1.0)
-        d = d * (1.0 - h) + sd * h - k * h * (1.0 - h)
+        d = smooth_min(d, sd, 0.5)
     return d
 
 
