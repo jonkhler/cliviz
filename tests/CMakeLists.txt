@@ -9,6 +9,7 @@ add_executable(cliviz_tests
     sdf_test.cpp
     threadpool_test.cpp
     capi_test.cpp
+    integration_test.cpp
 )
 
 target_link_libraries(cliviz_tests PRIVATE cliviz_static GTest::gtest_main)
