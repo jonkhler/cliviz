@@ -111,8 +111,18 @@ def meta_normal(p: ti.math.vec3, t: float) -> ti.math.vec3:
 
 
 @ti.func
+def refract_ray(rd: ti.math.vec3, n: ti.math.vec3, eta: float) -> ti.math.vec3:
+    """Snell's law refraction. Returns zero vector for total internal reflection."""
+    cos_i = -ti.math.dot(n, rd)
+    sin2_t = eta * eta * (1.0 - cos_i * cos_i)
+    cos_t = ti.sqrt(ti.max(1.0 - sin2_t, 0.0))
+    return rd * eta + n * (eta * cos_i - cos_t)
+
+
+@ti.func
 def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     p = uv * 2.0 - 1.0
+    p.y = -p.y  # flip Y so floor is at bottom
 
     # Camera — orbit, look slightly down at the blobs
     cam_angle = t * 0.4
@@ -177,8 +187,7 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
         # Refracted ray — trace through the glass blob
         refr_col = bg_col
         if glass_amount > 0.1:
-            eta = 1.0 / 1.45  # glass IOR
-            refr_rd = ti.math.refract(rd, n, eta)
+            refr_rd = refract_ray(rd, n, 1.0 / 1.45)
             # March the refracted ray
             refr_t = 0.1
             for _ in range(30):
