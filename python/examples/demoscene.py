@@ -49,41 +49,102 @@ def tunnel(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     tx = angle / 3.14159 * 2.0 + t * 0.3
     ty = 1.0 / (radius + 0.001) + t * 2.0
 
-    # Checkerboard pattern with glow
-    check = ti.math.mod(ti.floor(tx * 4.0) + ti.floor(ty * 2.0), 2.0)
-    glow = 0.02 / (radius * radius + 0.02)
+    # Hexagonal pattern instead of checkerboard
+    v1 = ti.sin(tx * 6.0) * ti.sin(ty * 3.0)
+    v2 = ti.sin(tx * 3.0 + ty * 6.0 + t)
+    pattern = ti.math.clamp(v1 * 0.5 + v2 * 0.3 + 0.5, 0.0, 1.0)
 
-    base = palette(ty * 0.1 + t * 0.1,
+    # Center glow + depth glow
+    center_glow = 0.03 / (radius * radius + 0.03)
+    depth_pulse = ti.sin(ty * 0.5 - t * 3.0) * 0.5 + 0.5
+
+    base = palette(ty * 0.08 + t * 0.05,
                    ti.math.vec3(0.5), ti.math.vec3(0.5),
-                   ti.math.vec3(1.0, 1.0, 0.5), ti.math.vec3(0.0, 0.1, 0.2))
-    return base * (check * 0.5 + 0.3) + ti.math.vec3(glow * 0.5, glow * 0.3, glow)
+                   ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
+
+    col = base * (pattern * 0.6 + 0.2)
+    # Specular-like highlights on the tunnel walls
+    spec = ti.pow(ti.max(ti.sin(tx * 12.0 + t * 2.0), 0.0), 8.0) * depth_pulse
+    col += ti.math.vec3(0.8, 0.9, 1.0) * spec * 0.3 / (radius + 0.1)
+    col += ti.math.vec3(center_glow * 0.6, center_glow * 0.3, center_glow * 0.8)
+    return col
 
 
-# ── Effect 2: Metaballs ──
+# ── Effect 2: 3D Raymarched Metaballs ──
+
+@ti.func
+def sdf_metaballs(p: ti.math.vec3, t: float) -> float:
+    d = 1e10
+    for i in range(5):
+        fi = float(i)
+        bp = ti.math.vec3(
+            ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 1.2,
+            ti.cos(t * (0.5 + fi * 0.17) + fi * 2.1) * 0.8,
+            ti.sin(t * (0.3 + fi * 0.19) + fi * 0.7) * 1.0,
+        )
+        sd = (p - bp).norm() - 0.5
+        # Smooth union
+        k = 0.6
+        h = ti.math.clamp(0.5 + 0.5 * (d - sd) / k, 0.0, 1.0)
+        d = d * (1.0 - h) + sd * h - k * h * (1.0 - h)
+    return d
+
 
 @ti.func
 def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     p = uv * 2.0 - 1.0
-    p.x *= 1.5  # aspect correction approximation
+    aspect = 1.5
+    p.x *= aspect
 
-    energy = 0.0
-    for i in range(6):
-        fi = float(i)
-        bx = ti.sin(t * (0.7 + fi * 0.13) + fi * 1.3) * 0.6
-        by = ti.cos(t * (0.5 + fi * 0.17) + fi * 2.1) * 0.6
-        bp = ti.math.vec2(bx, by)
-        d = (p - bp).norm()
-        energy += 0.03 / (d * d + 0.001)
+    # Camera
+    eye = ti.math.vec3(0, 0, -4.0)
+    rd = ti.math.normalize(ti.math.vec3(p.x, p.y, 2.0))
 
-    # Threshold and color
-    v = ti.math.clamp(energy - 1.0, 0.0, 3.0) / 3.0
-    col = palette(v + t * 0.05,
-                  ti.math.vec3(0.5, 0.5, 0.5), ti.math.vec3(0.5, 0.5, 0.5),
-                  ti.math.vec3(2.0, 1.0, 0.0), ti.math.vec3(0.5, 0.2, 0.25))
-    # Edge glow
-    edge = ti.exp(-ti.abs(energy - 1.0) * 5.0) * 2.0
-    col += ti.math.vec3(edge * 0.3, edge * 0.5, edge)
-    return col * v + ti.math.vec3(0.02, 0.01, 0.04) * (1.0 - v)
+    # Raymarch
+    ray_t = 0.0
+    hit = False
+    for _ in range(48):
+        pos = eye + rd * ray_t
+        d = sdf_metaballs(pos, t)
+        if d < 0.005:
+            hit = True
+            break
+        if ray_t > 15.0:
+            break
+        ray_t += d
+
+    col = ti.math.vec3(0.02, 0.01, 0.05)
+    if hit:
+        pos = eye + rd * ray_t
+        e = 0.001
+        n = ti.math.normalize(ti.math.vec3(
+            sdf_metaballs(pos + ti.math.vec3(e, 0, 0), t) - sdf_metaballs(pos - ti.math.vec3(e, 0, 0), t),
+            sdf_metaballs(pos + ti.math.vec3(0, e, 0), t) - sdf_metaballs(pos - ti.math.vec3(0, e, 0), t),
+            sdf_metaballs(pos + ti.math.vec3(0, 0, e), t) - sdf_metaballs(pos - ti.math.vec3(0, 0, e), t),
+        ))
+
+        light = ti.math.normalize(ti.math.vec3(1.0, 1.5, -1.0))
+        diff = ti.max(ti.math.dot(n, light), 0.0)
+
+        # Specular (Blinn-Phong)
+        half_v = ti.math.normalize(light - rd)
+        spec = ti.pow(ti.max(ti.math.dot(n, half_v), 0.0), 64.0)
+
+        # Rim lighting
+        rim = 1.0 - ti.max(ti.math.dot(n, -rd), 0.0)
+        rim = ti.pow(rim, 3.0)
+
+        # Iridescent material from normal
+        mat = palette(ti.math.dot(n, ti.math.vec3(1.0, 0.5, 0.3)) * 0.5 + t * 0.1,
+                      ti.math.vec3(0.5), ti.math.vec3(0.5),
+                      ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.15, 0.2))
+
+        col = mat * (diff * 0.6 + 0.15) + ti.math.vec3(spec) * 0.8 + ti.math.vec3(0.2, 0.4, 0.8) * rim * 0.5
+
+        # Fog
+        fog = ti.exp(-ray_t * 0.08)
+        col = col * fog + ti.math.vec3(0.02, 0.01, 0.05) * (1.0 - fog)
+    return col
 
 
 # ── Effect 3: Raymarched terrain ──
@@ -99,44 +160,57 @@ def terrain_height(p: ti.math.vec2) -> float:
 @ti.func
 def terrain(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     p = uv * 2.0 - 1.0
+    p.y = -p.y  # flip Y so sky is at top
 
-    # Camera
-    ro = ti.math.vec3(t * 2.0, 2.0, t * 1.5)
-    rd = ti.math.normalize(ti.math.vec3(p.x * 0.8, p.y * 0.5 - 0.3, 1.0))
+    # Camera — fly forward and gently bob
+    ro = ti.math.vec3(t * 2.0, 2.5 + ti.sin(t * 0.5) * 0.3, t * 1.5)
+    rd = ti.math.normalize(ti.math.vec3(p.x * 0.8, p.y * 0.5 - 0.2, 1.0))
+
+    sky_col = ti.math.vec3(0.15, 0.08, 0.25)
+    sun_dir = ti.math.normalize(ti.math.vec3(0.5, 0.8, -0.3))
+    col = sky_col
+
+    # Sky gradient
+    sky_t = ti.math.clamp(rd.y * 2.0 + 0.5, 0.0, 1.0)
+    col = sky_col * (1.0 - sky_t) + ti.math.vec3(0.3, 0.15, 0.4) * sky_t
 
     # Raymarch terrain
-    col = ti.math.vec3(0.1, 0.05, 0.15)  # sky
     hit_t = 0.0
-    for _ in range(64):
+    for _ in range(80):
         pos = ro + rd * hit_t
         h = terrain_height(ti.math.vec2(pos.x, pos.z))
         d = pos.y - h
         if d < 0.01:
-            # Hit terrain
             n_eps = 0.05
             nx = terrain_height(ti.math.vec2(pos.x + n_eps, pos.z)) - terrain_height(ti.math.vec2(pos.x - n_eps, pos.z))
             nz = terrain_height(ti.math.vec2(pos.x, pos.z + n_eps)) - terrain_height(ti.math.vec2(pos.x, pos.z - n_eps))
             normal = ti.math.normalize(ti.math.vec3(-nx, 2.0 * n_eps, -nz))
-            light = ti.math.normalize(ti.math.vec3(0.5, 0.8, -0.3))
-            diff = ti.max(ti.math.dot(normal, light), 0.0)
 
-            terrain_col = palette(h * 0.5 + 0.5,
-                                  ti.math.vec3(0.2, 0.4, 0.1), ti.math.vec3(0.3, 0.3, 0.2),
-                                  ti.math.vec3(1.0, 0.7, 0.4), ti.math.vec3(0.0, 0.05, 0.2))
-            col = terrain_col * (diff * 0.7 + 0.3)
+            diff = ti.max(ti.math.dot(normal, sun_dir), 0.0)
 
-            # Fog
-            fog = ti.exp(-hit_t * 0.03)
-            col = col * fog + ti.math.vec3(0.1, 0.05, 0.15) * (1.0 - fog)
+            # Specular water-like sheen
+            half_v = ti.math.normalize(sun_dir - rd)
+            spec = ti.pow(ti.max(ti.math.dot(normal, half_v), 0.0), 32.0)
+
+            # Height-based color: deep=water blue, mid=green, high=snow
+            terrain_col = palette(h * 0.3 + 0.5,
+                                  ti.math.vec3(0.15, 0.3, 0.1), ti.math.vec3(0.3, 0.3, 0.2),
+                                  ti.math.vec3(1.0, 0.8, 0.5), ti.math.vec3(0.0, 0.1, 0.2))
+
+            col = terrain_col * (diff * 0.7 + 0.2) + ti.math.vec3(1.0, 0.9, 0.7) * spec * 0.4
+
+            # Distance fog blending into sky
+            fog = ti.exp(-hit_t * 0.025)
+            col = col * fog + sky_col * (1.0 - fog)
             break
         hit_t += ti.max(d * 0.5, 0.1)
-        if hit_t > 50.0:
+        if hit_t > 60.0:
             break
 
-    # Sun
-    sun_dir = ti.math.normalize(ti.math.vec3(0.5, 0.8, -0.3))
-    sun = ti.max(ti.math.dot(rd, sun_dir), 0.0)
-    col += ti.math.vec3(1.0, 0.7, 0.3) * ti.pow(sun, 32.0) * 0.5
+    # Sun disc + halo
+    sun_dot = ti.max(ti.math.dot(rd, sun_dir), 0.0)
+    col += ti.math.vec3(1.0, 0.7, 0.3) * ti.pow(sun_dot, 64.0) * 1.0
+    col += ti.math.vec3(1.0, 0.5, 0.2) * ti.pow(sun_dot, 8.0) * 0.15
     return col
 
 
