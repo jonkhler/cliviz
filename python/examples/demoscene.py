@@ -91,6 +91,21 @@ def sdf_metaballs(p: ti.math.vec3, t: float) -> float:
 
 
 @ti.func
+def sdf_meta_scene(p: ti.math.vec3, t: float) -> float:
+    return ti.min(sdf_metaballs(p, t), p.y + 1.5)
+
+
+@ti.func
+def meta_normal(p: ti.math.vec3, t: float) -> ti.math.vec3:
+    e = 0.001
+    return ti.math.normalize(ti.math.vec3(
+        sdf_meta_scene(p + ti.math.vec3(e, 0, 0), t) - sdf_meta_scene(p - ti.math.vec3(e, 0, 0), t),
+        sdf_meta_scene(p + ti.math.vec3(0, e, 0), t) - sdf_meta_scene(p - ti.math.vec3(0, e, 0), t),
+        sdf_meta_scene(p + ti.math.vec3(0, 0, e), t) - sdf_meta_scene(p - ti.math.vec3(0, 0, e), t),
+    ))
+
+
+@ti.func
 def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     p = uv * 2.0 - 1.0
     aspect = 1.5
@@ -104,28 +119,23 @@ def metaballs(uv: ti.math.vec2, t: float) -> ti.math.vec3:
     up = ti.math.cross(right, fwd)
     rd = ti.math.normalize(fwd + right * p.x + up * p.y * 0.7)
 
-    # Raymarch
+    # Raymarch (metaballs + floor)
     ray_t = 0.0
     hit = False
-    for _ in range(48):
+    for _ in range(64):
         pos = eye + rd * ray_t
-        d = sdf_metaballs(pos, t)
+        d = sdf_meta_scene(pos, t)
         if d < 0.005:
             hit = True
             break
-        if ray_t > 15.0:
+        if ray_t > 20.0:
             break
         ray_t += d
 
-    col = ti.math.vec3(0.02, 0.01, 0.05)
+    col = ti.math.vec3(0.05, 0.02, 0.1)  # visible dark purple background
     if hit:
         pos = eye + rd * ray_t
-        e = 0.001
-        n = ti.math.normalize(ti.math.vec3(
-            sdf_metaballs(pos + ti.math.vec3(e, 0, 0), t) - sdf_metaballs(pos - ti.math.vec3(e, 0, 0), t),
-            sdf_metaballs(pos + ti.math.vec3(0, e, 0), t) - sdf_metaballs(pos - ti.math.vec3(0, e, 0), t),
-            sdf_metaballs(pos + ti.math.vec3(0, 0, e), t) - sdf_metaballs(pos - ti.math.vec3(0, 0, e), t),
-        ))
+        n = meta_normal(pos, t)
 
         light = ti.math.normalize(ti.math.vec3(1.0, 1.5, -1.0))
         diff = ti.max(ti.math.dot(n, light), 0.0)
