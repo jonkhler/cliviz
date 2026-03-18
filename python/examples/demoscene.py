@@ -444,7 +444,7 @@ def main() -> None:
             name = EFFECT_NAMES[current]
             label = f" {fps:.0f}fps  {name}  [1-4]select [space]auto [q]uit "
             pb.draw_text(1, 0, label, 220, 220, 220, 20, 20, 30)
-            pb.present_nodiff()
+            pb.present()
 
             time.sleep(max(0, 0.008 - (time.monotonic() - now)))
 

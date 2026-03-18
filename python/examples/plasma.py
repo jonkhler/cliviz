@@ -67,7 +67,7 @@ def main() -> None:
             pb.encode_all()
             fps = 1.0 / dt if dt > 0 else 0
             pb.draw_text(1, 0, f" {fps:.0f}fps  plasma  q=quit ", 255, 255, 255, 40, 0, 40)
-            pb.present_nodiff()
+            pb.present()
 
             time.sleep(max(0, 0.008 - (time.monotonic() - now)))  # cap ~120fps
 

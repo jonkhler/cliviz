@@ -6,6 +6,7 @@ add_executable(cliviz_tests
     pixbuf_test.cpp
     integration_test.cpp
     color_test.cpp
+    diff_regression_test.cpp
 )
 
 target_link_libraries(cliviz_tests PRIVATE cliviz_static GTest::gtest_main)
