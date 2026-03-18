@@ -1,135 +1,141 @@
 # cliviz
 
-Terminal 3D rendering engine. Treats your terminal as a pixel display using Unicode half-block characters (`▀`) for 2x vertical resolution. Ships as a C++20 library with Python bindings.
-
-## Features
-
-- **Half-block pixel display** — each terminal cell encodes two pixels vertically via `▀` with independent fg/bg colors
-- **Double-buffered diff engine** — only changed cells emit ANSI escapes, minimizing output bytes
-- **Triangle rasterizer** — perspective projection, z-buffer, backface culling, Gouraud shading
-- **SDF raymarcher** — signed distance fields with shadows, ambient occlusion, distance fog
-- **Multi-threaded** — parallel SDF rendering across all CPU cores
-- **Python bindings** — numpy zero-copy pixel access, all rendering stays in C++
-- **Zero dependencies** — no ncurses, no frameworks. Just POSIX + a C++20 compiler
+High-throughput terminal pixel engine. Treats your terminal as a pixel display using Unicode half-block characters (`▀`) for 2x vertical sub-pixel resolution. The C++ core handles terminal I/O, differential rendering, and ANSI escape generation. You bring the pixels — from numpy, GPU compute (Taichi/wgpu), or any source.
 
 ## Install
 
 ```bash
-# Python (requires C++20 compiler + CMake)
 uv pip install .
 
-# C++ only
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+# With GPU example support (Taichi)
+uv pip install ".[gpu]"
 ```
 
-## Quick start (Python)
+## Quick start
 
 ```python
 import cliviz
 import numpy as np
 
 with cliviz.Terminal() as term:
-    pb = cliviz.PixelBuffer(term.cols, term.rows - 1)
-    zb = cliviz.ZBuffer(pb.width, pb.height)
-    mesh = cliviz.make_cube()
+    pb = cliviz.PixelBuffer(term.cols, term.rows)
 
-    eye = np.array([0, 2, 5], dtype=np.float32)
-    center = np.zeros(3, dtype=np.float32)
-    up = np.array([0, 1, 0], dtype=np.float32)
+    # Write pixels however you want
+    pixels = pb.pixels  # numpy (H, W, 3) uint8 — zero-copy view into C++ buffer
+    pixels[10:20, 10:30] = [255, 0, 0]  # red rectangle via numpy
 
-    proj = cliviz.perspective(1.0, pb.width / pb.height, 0.1, 100.0)
-    view = cliviz.look_at(eye, center, up)
-    mvp = (proj @ view).astype(np.float32)
-
-    pb.clear(0, 0, 0)
-    zb.clear()
-    cliviz.rasterize(pb, zb, mesh, mvp)
-    pb.flush()
-
-    input()  # wait before exiting
+    pb.flush_full()  # encode + diff + write to terminal
+    input()
 ```
 
-## Quick start (C++)
+## GPU-accelerated rendering (Taichi example)
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
-./build/cliviz_demo
+uv pip install ".[gpu]"
+uv run python python/examples/sdf_taichi.py
 ```
 
-Keys: `1` cube, `2` sphere, `3` SDF raymarcher, `WASD`/arrows orbit, `+`/`-` zoom, `space` toggle rotation, `q` quit.
+A Taichi `@ti.kernel` renders an SDF scene on the GPU (Metal), writing directly into `pb.pixels`. The C++ engine handles only terminal output. Zero CPU pixel computation.
 
 ## Python API
 
 ```python
 import cliviz
 
-# Terminal lifecycle (context manager)
+# Terminal lifecycle
 with cliviz.Terminal() as term:
-    term.cols, term.rows   # terminal dimensions
-    term.was_resized()     # poll for SIGWINCH
+    term.cols, term.rows       # terminal dimensions
+    term.was_resized()         # poll for SIGWINCH
 
-# Pixel buffer
+# Pixel buffer — the core abstraction
 pb = cliviz.PixelBuffer(cols, rows)
-pb.pixels                  # numpy (H, W, 3) uint8 — zero-copy view
-pb.set(x, y, r, g, b)
-pb.clear(r, g, b)
+pb.pixels                      # numpy (H, W, 3) uint8, zero-copy
+pb.set(x, y, r, g, b)         # single pixel
+pb.clear(r, g, b)             # fill all
 pb.fill_rect(x0, y0, x1, y1, r, g, b)
-pb.flush()                 # diff + encode + write to terminal
-pb.flush_full()            # full redraw (after writing every pixel)
 
-# 3D rasterization (C++ speed)
-mesh = cliviz.make_cube()
-mesh = cliviz.make_icosphere(subdivisions=2)
-zb = cliviz.ZBuffer(w, h)
-cliviz.rasterize(pb, zb, mesh, mvp)  # mvp is 4x4 numpy float32
+# Text overlay — uses the terminal's native font
+pb.draw_text(col, row, "hello", fg_r, fg_g, fg_b, bg_r, bg_g, bg_b)
 
-# Matrix helpers
-cliviz.perspective(fov_y, aspect, near, far)
-cliviz.look_at(eye, center, up)       # eye/center/up are numpy float32[3]
-cliviz.rotate_y(radians)
-cliviz.rotate_x(radians)
+# Frame output pipeline
+pb.flush()                     # encode dirty + diff + write
+pb.flush_full()                # encode all + diff + write
 
-# SDF raymarcher (multi-threaded)
-cliviz.sdf_render(pb, time, eye, center, max_steps=40)
+# For text overlays: split encode and present
+pb.encode_all()                # pixels → cells
+pb.draw_text(0, 0, "60fps")   # text on top (after encode, before present)
+pb.present()                   # diff + write to terminal
 ```
 
 ## Architecture
 
 ```
-include/cliviz/          C++ public headers
-  outbuf.h               256KB output buffer + ANSI escape helpers
-  cell.h                 8-byte packed Cell struct + glyph table
-  math3d.h               vec3/vec4/mat4 linear algebra
-  term.h                 terminal raw mode, SIGWINCH
-  framebuf.h             double-buffered cell framebuffer, diff engine
-  pixbuf.h               pixel buffer, half-block encode, NEON paths
-  raster.h               triangle rasterizer, z-buffer, Gouraud
-  sdf.h                  SDF raymarcher, parallel rendering
-  threadpool.h           fork-join thread pool
-include/cliviz.h         flat C API (extern "C") for FFI
-src/                     C++ implementation
-python/cliviz/           Python package (nanobind bindings)
-examples/                C++ demo + Python examples
-tests/                   108 C++ tests (GTest)
-python/tests/            13 Python tests (pytest)
+┌──────────────────────────────────────────┐
+│           Your code (Python)             │
+│  numpy, Taichi, wgpu, PIL, matplotlib…   │
+│         writes RGB pixels into           │
+└──────────────┬───────────────────────────┘
+               │  pb.pixels (numpy, zero-copy)
+               ▼
+┌──────────────────────────────────────────┐
+│        cliviz C++ core (~500 LOC)        │
+│                                          │
+│  PixelBuffer ──encode──▶ Framebuffer     │
+│  (RGB array)    ▀▀▀     (8-byte cells)  │
+│                            │             │
+│                        diff engine       │
+│                        (dirty bitmask)   │
+│                            │             │
+│                      OutputBuffer        │
+│                   (ANSI escape stream)   │
+│                            │             │
+│                     write(STDOUT)        │
+│                  (single syscall,        │
+│                   synchronized output)   │
+└──────────────────────────────────────────┘
+               │
+               ▼
+          Terminal (Ghostty, Kitty, etc.)
 ```
 
-## How it works
+The C++ core does one thing: convert a pixel array into minimal ANSI output at maximum throughput. It owns:
 
-1. **Pixel buffer** (`PixelBuffer`): a 2D RGB array at 2x terminal vertical resolution
-2. **Half-block encode**: pairs of pixel rows map to terminal cells — top pixel becomes fg color, bottom becomes bg color, character is `▀`
-3. **Cell framebuffer** (`Framebuffer`): double-buffered 8-byte cells with bitmask dirty tracking
-4. **Diff engine**: compares back vs front buffer, emits only changed cells as ANSI cursor-position + color + character sequences
-5. **Single write()**: entire frame buffered in a 256KB `OutputBuffer`, flushed with one `write()` syscall wrapped in synchronized output (`\e[?2026h/l`)
+- **Half-block encoding** — pixel pairs → terminal cells with `▀` + fg/bg colors
+- **Double-buffered diff** — only changed cells are emitted
+- **ANSI serialization** — hand-rolled uint8→ASCII, cursor positioning, color escapes
+- **Single `write()` per frame** — 256KB buffer, synchronized output wrapping
 
-## Tests
+Everything above the pixel buffer (rendering, compute, scene logic) lives in Python/user code.
+
+## Why C++ instead of pure Python?
+
+The diff engine + ANSI serialization is the one path where Python is too slow. At 120fps with ~8K cells, building ~170KB of variable-length ANSI escape sequences per frame requires sub-millisecond serialization. The C++ core is ~500 lines — the thinnest possible native layer. Pixel computation (the expensive part) stays in Python/GPU.
+
+## Project structure
+
+```
+pyproject.toml               Python packaging (scikit-build-core + nanobind)
+CMakeLists.txt               C++ build (also used by Python wheel build)
+csrc/                        C++ terminal engine
+  include/cliviz/            public headers (outbuf, cell, framebuf, pixbuf, term)
+  src/                       implementation
+  tests/                     GTest suite
+python/
+  cliviz/                    Python package
+    __init__.py
+    _native.cpp              nanobind bindings
+  examples/
+    sdf_taichi.py            GPU SDF raymarcher demo
+  tests/                     pytest suite
+```
+
+## Development
 
 ```bash
-# Python
+# Python tests
 uv run python -m pytest
 
-# C++
+# C++ tests
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
@@ -137,4 +143,4 @@ ctest --test-dir build
 
 ## License
 
-MIT
+MIT — Jonas Köhler
