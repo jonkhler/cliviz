@@ -2,8 +2,8 @@
 
 ## Current state
 
-Terminal 3D rendering engine in C++20. Stages 0, 1, 3, 5, 6.1, 6.3 complete.
-85 tests, all passing.
+Terminal 3D rendering engine in C++20. All major plan stages implemented.
+93 tests, all passing.
 
 ### Implemented stages
 
@@ -17,9 +17,12 @@ and color state optimization.
 **Stage 3 — Pixel Buffer & Half-Block Encoding**: Sub-pixel vertical resolution via ▀,
 dirty propagation from pixel to cell level, encode only dirty regions.
 
+**Stage 4 — Multi-Core Parallelism**: Fork-join thread pool with row-band
+partitioning. SDF raymarcher uses all cores for embarrassingly parallel rendering.
+
 **Stage 5 — 3D Rasterizer**: vec3/vec4/mat4 math, perspective projection, scanline
-triangle rasterizer with backface culling, z-buffer, flat shading. Procedural cube
-and icosphere generators. Interactive demo with orbit camera.
+triangle rasterizer with backface culling, z-buffer, flat and Gouraud shading.
+Procedural cube and icosphere generators.
 
 **Stage 6.1 — Gouraud Shading**: Per-vertex normal interpolation, directional light
 with ambient term, smooth color gradients on the icosphere.
@@ -28,41 +31,46 @@ with ambient term, smooth color gradients on the icosphere.
 smooth union CSG, diffuse lighting, shadow rays, ambient occlusion, distance fog,
 checkerboard floor.
 
+**Stage 6.4 — Perceptual Delta Skip**: Framebuffer flush skips cells where all RGB
+channels differ by less than a configurable threshold, reducing ANSI output bytes.
+
+**Stage 6.6 — Input/Resize Handling**: SIGWINCH handler enables live terminal resize
+with automatic buffer reallocation.
+
 ### Build & run
 ```
 conan install . --output-folder=build --build=missing -s compiler.cppstd=20
 cmake --preset conan-release
 cmake --build build
-./build/cliviz              # interactive demo (1:cube 2:sphere 3:sdf)
-ctest --test-dir build      # 85 tests
+./build/cliviz              # interactive demo
+ctest --test-dir build      # 93 tests
 ```
 
 ### Controls
 - WASD / arrow keys: orbit camera
 - +/-: zoom in/out
-- 1: cube (flat shading), 2: sphere (Gouraud), 3: SDF raymarcher
+- 1: cube (flat shading), 2: sphere (Gouraud), 3: SDF raymarcher (multi-threaded)
 - Space: toggle auto-rotation
 - q: quit
 
 ### Architecture
 ```
 src/
-  outbuf.h        — 256KB output buffer + ANSI escape helpers
-  cell.h          — 8-byte Cell struct + glyph table
-  math3d.h        — vec3/vec4/mat4 linear algebra
-  term.h/.cpp     — terminal raw mode, setup/teardown
-  framebuf.h/.cpp — double-buffered cell framebuffer, diff engine
-  pixbuf.h/.cpp   — pixel buffer, half-block encode
-  raster.h/.cpp   — triangle rasterizer, z-buffer, Gouraud, mesh generators
-  sdf.h/.cpp      — SDF raymarcher with lighting
-  main.cpp        — interactive demo
+  outbuf.h          — 256KB output buffer + ANSI escape helpers
+  cell.h            — 8-byte Cell struct + glyph table
+  math3d.h          — vec3/vec4/mat4 linear algebra
+  term.h/.cpp       — terminal raw mode, setup/teardown, SIGWINCH
+  framebuf.h/.cpp   — double-buffered cell framebuffer, diff engine
+  pixbuf.h/.cpp     — pixel buffer, half-block encode
+  raster.h/.cpp     — triangle rasterizer, z-buffer, Gouraud, meshes
+  sdf.h/.cpp        — SDF raymarcher with parallel rendering
+  threadpool.h/.cpp — fork-join thread pool
+  main.cpp          — interactive demo
 tests/
-  8 test files, 85 tests
+  9 test files, 93 tests
 ```
 
-## Next (plan.md stages not yet done)
+## Next (remaining from plan.md)
 
-- **Stage 2**: SIMD optimization (NEON on ARM, not AVX2)
-- **Stage 4**: Multi-core parallelism (thread pool, row-band partitioning)
-- **Stage 6 remaining**: Textures, color quantization, adaptive quality,
-  mouse input, resize handling
+- **Stage 2**: SIMD optimization (NEON on ARM)
+- **Stage 6 remaining**: Textures, 256-color fallback, adaptive quality
