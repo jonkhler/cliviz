@@ -156,7 +156,7 @@ NB_MODULE(_native, mod) {
             if (!t.init()) throw std::runtime_error("Failed to init terminal (not a TTY?)");
             return t;
         })
-        .def("__exit__", [](Terminal& t, nb::object, nb::object, nb::object) {
+        .def("__exit__", [](Terminal& t, const nb::args&) {
             t.shutdown();
         });
 
