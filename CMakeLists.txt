@@ -11,26 +11,26 @@ add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 # ── Library (static + shared) ──
 
 set(CLIVIZ_SOURCES
-    src/term.cpp
-    src/framebuf.cpp
-    src/pixbuf.cpp
-    src/raster.cpp
-    src/sdf.cpp
-    src/threadpool.cpp
-    src/cliviz_api.cpp
+    csrc/src/term.cpp
+    csrc/src/framebuf.cpp
+    csrc/src/pixbuf.cpp
+    csrc/src/raster.cpp
+    csrc/src/sdf.cpp
+    csrc/src/threadpool.cpp
+    csrc/src/cliviz_api.cpp
 )
 
 add_library(cliviz_static STATIC ${CLIVIZ_SOURCES})
-target_include_directories(cliviz_static PUBLIC include/cliviz include)
+target_include_directories(cliviz_static PUBLIC csrc/include/cliviz csrc/include)
 
 add_library(cliviz_shared SHARED ${CLIVIZ_SOURCES})
-target_include_directories(cliviz_shared PUBLIC include/cliviz include)
+target_include_directories(cliviz_shared PUBLIC csrc/include/cliviz csrc/include)
 set_target_properties(cliviz_shared PROPERTIES OUTPUT_NAME cliviz)
 
 # ── Demo example (skip when building Python wheel) ──
 
 if(NOT SKBUILD)
-    add_executable(cliviz_demo examples/demo.cpp)
+    add_executable(cliviz_demo csrc/examples/demo.cpp)
     target_link_libraries(cliviz_demo PRIVATE cliviz_static)
 endif()
 
@@ -44,17 +44,15 @@ if(NOT SKBUILD)
         GIT_TAG v1.15.2
         GIT_SHALLOW TRUE
     )
-    # Suppress GTest install and compiler warnings
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    # Temporarily disable -Werror for GTest sources
     set(CMAKE_CXX_FLAGS_SAVED "${CMAKE_CXX_FLAGS}")
     string(REPLACE "-Werror" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     FetchContent_MakeAvailable(googletest)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_SAVED}")
 
     enable_testing()
-    add_subdirectory(tests)
+    add_subdirectory(csrc/tests)
 endif()
 
 # ── Python bindings (nanobind) ──
@@ -74,5 +72,5 @@ install(TARGETS cliviz_static cliviz_shared
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
-install(DIRECTORY include/cliviz/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cliviz)
-install(FILES include/cliviz.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY csrc/include/cliviz/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cliviz)
+install(FILES csrc/include/cliviz.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
