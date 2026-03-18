@@ -2,34 +2,51 @@
 
 ## Current state
 
-C++20 CLI visualization project. Stack fully configured:
+Terminal 3D rendering engine in C++20. Stages 0, 1, 3, 5 complete.
 
-- **Language**: C++20, Clang with `-Wall -Wextra -Wpedantic -Werror`
-- **Test runner**: Google Test 1.15.0 (via Conan)
-- **Build**: CMake 3.20+ with Conan 2 for dependency management
-- **Pre-commit**: local hooks for cmake build + ctest
-- **Conan installed via**: `uv tool install conan`
+### Implemented stages
 
-### Project structure
-```
-CMakeLists.txt          # Root build config (C++20, strict flags)
-conanfile.txt           # Conan dependencies (gtest)
-.pre-commit-config.yaml # Build + test hooks
-tests/
-  CMakeLists.txt        # Test target config
-  smoke_test.cpp        # Smoke test verifying toolchain
-.bedrock/stack.yml      # Stack metadata for /qa
-```
+**Stage 0 — Terminal Primitives**: Raw mode, alternate screen, signal-safe cleanup,
+256KB output buffer with hand-rolled uint8→ASCII LUT, ANSI escape helpers.
 
-### Build commands
+**Stage 1 — Cell Framebuffer & Diff Engine**: 8-byte packed Cell (uint64 compare),
+double-buffered framebuffer with bitmask dirty tracking, diff-only flush with cursor
+and color state optimization.
+
+**Stage 3 — Pixel Buffer & Half-Block Encoding**: Sub-pixel vertical resolution via ▀,
+dirty propagation from pixel to cell level, encode only dirty regions.
+
+**Stage 5 — 3D Rasterizer**: vec3/vec4/mat4 math, perspective projection, scanline
+triangle rasterizer with backface culling, z-buffer, flat shading. Procedural cube
+and icosphere generators. Interactive demo with orbit camera.
+
+### Build & run
 ```
 conan install . --output-folder=build --build=missing -s compiler.cppstd=20
 cmake --preset conan-release
 cmake --build build
-ctest --test-dir build --output-on-failure
+./build/cliviz              # interactive demo
+ctest --test-dir build      # 76 tests
 ```
 
-## Next
+### Architecture
+```
+src/
+  outbuf.h        — output buffer + ANSI escape helpers (header-only)
+  cell.h          — 8-byte Cell struct + glyph table (header-only)
+  math3d.h        — vec3/vec4/mat4 linear algebra (header-only)
+  term.h/.cpp     — terminal raw mode, setup/teardown
+  framebuf.h/.cpp — double-buffered cell framebuffer, diff engine
+  pixbuf.h/.cpp   — pixel buffer, half-block encode
+  raster.h/.cpp   — triangle rasterizer, z-buffer, mesh generators
+  main.cpp        — spinning cube/sphere demo
+tests/
+  7 test files, 76 tests total
+```
 
-- Define project purpose and initial features
-- Add src/ directory with library/executable targets
+## Next (plan.md stages not yet done)
+
+- **Stage 2**: SIMD optimization (NEON on ARM, not AVX2)
+- **Stage 4**: Multi-core parallelism (thread pool, row-band partitioning)
+- **Stage 6**: Gouraud shading, textures, SDF raymarcher, color quantization,
+  adaptive quality, input handling improvements
