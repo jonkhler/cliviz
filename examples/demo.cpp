@@ -176,24 +176,23 @@ int main() {
 
         outbuf.emit_cursor_to(ts.rows, 1);
         outbuf.append("\x1b[0m\x1b[7m", 8); // reset + inverse
-        char status[128];
+
+        // Status bar — use EL (erase to end of line) instead of space-padding
+        char status[256];
         const char* mode_name = mode == Mode::SDF ? "sdf" :
                                  (active_mesh == &cube ? "cube" : "sphere");
         int n;
         if (mode == Mode::SDF) {
             n = std::snprintf(status, sizeof(status),
-                " %s q:%d | cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit ",
+                " %s q:%d | cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit",
                 mode_name, sdf_quality, cells_emitted, frame_ms, fps);
         } else {
             n = std::snprintf(status, sizeof(status),
-                " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit ",
+                " %s | tris:%u cells:%u | %.1fms | %.0ffps | WASD:cam +-:zoom 1/2/3:mode q:quit",
                 mode_name, tris_drawn, cells_emitted, frame_ms, fps);
         }
-        // Pad to terminal width - 1 to avoid triggering auto-wrap scroll
-        int pad_to = ts.cols - 1;
-        for (int i = n; i < pad_to; ++i) status[i] = ' ';
-        int status_len = std::max(n, pad_to);
-        outbuf.append(status, static_cast<uint32_t>(std::min(status_len, static_cast<int>(sizeof(status)))));
+        outbuf.append(status, static_cast<uint32_t>(n));
+        outbuf.append("\x1b[K", 3); // erase to end of line (uses current bg)
         outbuf.append("\x1b[0m", 4); // reset
 
         outbuf.flush();
