@@ -26,6 +26,9 @@ if(NOT SKBUILD)
 
     add_executable(starfield csrc/examples/starfield.cpp)
     target_link_libraries(starfield PRIVATE cliviz_static)
+
+    add_executable(pipe csrc/examples/pipe.cpp)
+    target_link_libraries(pipe PRIVATE cliviz_static)
 endif()
 
 # ── Tests (FetchContent for GTest, skip during wheel build) ──
