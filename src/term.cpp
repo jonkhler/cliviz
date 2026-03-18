@@ -23,11 +23,11 @@ void restore_terminal() {
     g_active = false;
 
     // Restore cursor, leave alternate screen, reset attributes
-    constexpr const char* restore_seq =
+    const char restore_seq[] =
         "\x1b[?25h"    // show cursor
         "\x1b[?1049l"  // leave alternate screen
         "\x1b[0m";     // reset attributes
-    ::write(STDOUT_FILENO, restore_seq, 24);
+    ::write(STDOUT_FILENO, restore_seq, sizeof(restore_seq) - 1);
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_orig_termios);
 }
@@ -75,12 +75,12 @@ bool term_init() {
     std::signal(SIGWINCH, winch_handler);
 
     // Enter alternate screen, hide cursor
-    constexpr const char* init_seq =
+    const char init_seq[] =
         "\x1b[?1049h"  // alternate screen
         "\x1b[?25l"    // hide cursor
         "\x1b[2J"      // clear screen
         "\x1b[H";      // cursor to home
-    ::write(STDOUT_FILENO, init_seq, 22);
+    ::write(STDOUT_FILENO, init_seq, sizeof(init_seq) - 1);
 
     g_active = true;
     return true;
