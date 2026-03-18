@@ -12,6 +12,7 @@ dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+gpu = ["taichi>=1.7"]
 
 [tool.scikit-build]
 cmake.build-type = "Release"
