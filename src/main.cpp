@@ -145,14 +145,15 @@ int main() {
             float cy = std::cos(cam.yaw), sy = std::sin(cam.yaw);
             vec3 eye{cam.distance * cx * sy, cam.distance * sx, cam.distance * cx * cy};
             sdf_render_parallel(*pb, sdf_scene_default, angle, eye, {0, 0, 0}, {0, 1, 0}, pool);
+            pb->encode_all(); // fast path: SDF writes every pixel
         } else {
             pb->clear(15, 15, 25);
             zb.clear();
             mat4 model = mat4::rotate_y(angle) * mat4::rotate_x(angle * 0.3f);
             mat4 mvp = proj * cam.view_matrix() * model;
             tris_drawn = rasterize(*active_mesh, mvp, *pb, zb);
+            pb->encode();
         }
-        pb->encode();
 
         outbuf.clear();
         uint32_t cells_emitted = pb->fb->flush(outbuf);

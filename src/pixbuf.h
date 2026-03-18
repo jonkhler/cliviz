@@ -36,6 +36,10 @@ struct PixelBuffer {
     // Encode dirty pixel pairs → cells in the framebuffer back buffer.
     void encode();
 
+    // Fast path: encode all cells (skip dirty mask scan).
+    // Use when you know the entire buffer was rewritten (e.g., after SDF render).
+    void encode_all();
+
     // Fill entire pixel buffer with solid color, mark all dirty.
     void clear(uint8_t r, uint8_t g, uint8_t b);
 

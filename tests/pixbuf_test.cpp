@@ -153,6 +153,35 @@ TEST(PixelBuffer, FillRectSetsPixelsInRegion) {
     EXPECT_EQ(pb->pixels[idx_out + 0], 0u);
 }
 
+// ── encode_all (fast path) ──
+
+TEST(PixelBuffer, EncodeAllMatchesEncode) {
+    auto pb1 = PixelBuffer::create(10, 5);
+    auto pb2 = PixelBuffer::create(10, 5);
+
+    // Set identical pixels in both
+    for (uint32_t y = 0; y < pb1->height; ++y) {
+        for (uint32_t x = 0; x < pb1->width; ++x) {
+            auto r = static_cast<uint8_t>((x * 37 + y * 53) % 256);
+            auto g = static_cast<uint8_t>((x * 41 + y * 59) % 256);
+            auto b = static_cast<uint8_t>((x * 43 + y * 61) % 256);
+            pb1->set(x, y, r, g, b);
+            pb2->set(x, y, r, g, b);
+        }
+    }
+
+    pb1->fb->mark_all_dirty();
+    pb1->encode();
+
+    pb2->encode_all();
+
+    // Both should produce identical back buffers
+    for (uint32_t i = 0; i < pb1->fb->cell_count; ++i) {
+        EXPECT_EQ(pb1->fb->back[i], pb2->fb->back[i])
+            << "Cell " << i << " differs between encode and encode_all";
+    }
+}
+
 // ── Full pipeline: set → encode → flush ──
 
 TEST(PixelBuffer, FullPipeline) {
