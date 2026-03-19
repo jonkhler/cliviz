@@ -94,13 +94,9 @@ def main() -> None:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=8)
 
-        # Browser renders at normal resolution, we downscale to terminal pixels
-        vp_w, vp_h = 1280, 800
-        scale_x = vp_w / pb.width
-        scale_y = vp_h / pb.height
-
+        # Viewport = terminal pixel resolution. Forces mobile/responsive layouts.
         browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": vp_w, "height": vp_h})
+        page = browser.new_page(viewport={"width": pb.width, "height": pb.height})
         page.goto(url, wait_until="domcontentloaded")
 
         enable_mouse()
@@ -136,23 +132,22 @@ def main() -> None:
                     elif event[0] == "mouse":
                         _, button, cx, cy, pressed = event
                         if pressed and button == 0:
-                            # Terminal cell (1-based) → pixel → browser coords
-                            bx = (cx - 1) * scale_x
-                            by = (cy - 1) * 2 * scale_y / 2  # cell row → pixel row, then scale
+                            # Terminal cell (1-based) → pixel coords (1:1 mapping)
+                            bx = cx - 1
+                            by = (cy - 1) * 2  # cell row → pixel row (half-block = 2px/cell)
                             page.mouse.click(bx, by)
                             needs_refresh = True
 
                     elif event[0] == "scroll":
                         _, direction, cx, cy = event
-                        delta = -300 if direction == "up" else 300
+                        delta = -60 if direction == "up" else 60
                         page.mouse.wheel(0, delta)
                         needs_refresh = True
 
                 if needs_refresh:
                     png = page.screenshot(type="png")
                     img = Image.open(io.BytesIO(png)).convert("RGB")
-                    img = img.resize((pb.width, pb.height), Image.LANCZOS)
-                    pb.pixels[:] = np.array(img, dtype=np.uint8)
+                    pb.pixels[:] = np.array(img, dtype=np.uint8)[:pb.height, :pb.width]
                     needs_refresh = False
 
                     pb.encode_all()
