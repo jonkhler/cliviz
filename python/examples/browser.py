@@ -152,14 +152,8 @@ def main() -> None:
         ctx = make_context(browser, layout_w, layout_height(layout_w, pb), args.proxy)
         page = ctx.new_page()
 
-        # Redirect new-tab opens into the current page (target="_blank" links)
-        def handle_popup(popup) -> None:
-            url = popup.url
-            popup.close()
-            if url and url != "about:blank":
-                page.goto(url, wait_until="domcontentloaded")
-
-        page.on("popup", handle_popup)
+        # Force all links to open in the same tab
+        ctx.add_init_script("document.addEventListener('click', e => { const a = e.target.closest('a'); if (a) a.removeAttribute('target'); })")
 
         page.goto(args.url, wait_until="domcontentloaded")
         apply_page_styles(page)
