@@ -92,7 +92,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Terminal web browser")
     parser.add_argument("url", nargs="?", default="https://news.ycombinator.com")
     parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
-    parser.add_argument("--zoom", type=int, default=4, help="CSS pixels per terminal column (default 4)")
+    parser.add_argument("--width", type=int, default=1280,
+                        help="Layout width in CSS pixels (default 1280). "
+                             "Browser renders at this resolution; scale factor maps to terminal.")
     args = parser.parse_args()
 
     url = args.url
@@ -100,16 +102,25 @@ def main() -> None:
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=30)
-        zoom = args.zoom
-        vp_w = term.cols * zoom
-        vp_h = term.rows * zoom * 2
+
+        def make_context(browser, layout_w: int, px_w: int, px_h: int):
+            """Create a browser context with deviceScaleFactor so screenshots
+            arrive at terminal pixel dimensions with no resizing needed."""
+            scale = px_w / layout_w
+            layout_h = int(px_h / scale)
+            return browser.new_context(
+                viewport={"width": layout_w, "height": layout_h},
+                device_scale_factor=scale,
+            ), layout_w, layout_h, scale
 
         launch_opts: dict = {"headless": True}
         if args.proxy:
             launch_opts["proxy"] = {"server": args.proxy}
 
         browser = pw.chromium.launch(**launch_opts)
-        page = browser.new_page(viewport={"width": vp_w, "height": vp_h})
+        ctx, layout_w, layout_h, scale = make_context(
+            browser, args.width, pb.width, pb.height)
+        page = ctx.new_page()
         page.goto(url, wait_until="domcontentloaded")
 
         enable_mouse()
@@ -122,9 +133,10 @@ def main() -> None:
                 # Handle terminal resize (font size change → different cols/rows)
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    vp_w = term.cols * zoom
-                    vp_h = term.rows * zoom * 2
-                    page.set_viewport_size({"width": vp_w, "height": vp_h})
+                    ctx, layout_w, layout_h, scale = make_context(
+                        browser, args.width, pb.width, pb.height)
+                    page = ctx.new_page()
+                    page.goto(page.url, wait_until="domcontentloaded")
                     needs_refresh = True
 
                 for event in read_input(sys.stdin.fileno()):
@@ -153,12 +165,10 @@ def main() -> None:
                     elif event[0] == "mouse":
                         _, button, cx, cy, pressed = event
                         if pressed and button == 0:
-                            # Terminal cell (1-based) → browser CSS pixel coords
-                            # cx maps to [0, pb.width] → [0, vp_w]
-                            # cy maps to [0, term.rows] → [0, vp_h] (each cell row = 2 pixel rows)
-                            bx = (cx - 1) / term.cols * vp_w
-                            by = (cy - 1) / term.rows * vp_h
-                            page.mouse.click(bx, by)
+                            # Terminal cell (1-based) → pixel → CSS layout coords
+                            px = (cx - 1)          # pixel x
+                            py = (cy - 1) * 2      # pixel y (2 pixel rows per cell)
+                            page.mouse.click(px / scale, py / scale)
                             needs_refresh = True
 
                     elif event[0] == "scroll":
@@ -170,13 +180,13 @@ def main() -> None:
                 if needs_refresh:
                     try:
                         jpg = page.screenshot(type="jpeg", quality=60)
-                        img = Image.open(io.BytesIO(jpg)).convert("RGB")
-                        # Resize from browser viewport to terminal pixel dimensions
-                        img = img.resize((pb.width, pb.height), Image.BILINEAR)
-                        arr = np.array(img, dtype=np.uint8)
-                        pb.pixels[:arr.shape[0], :arr.shape[1]] = arr[:pb.height, :pb.width]
+                        arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"),
+                                       dtype=np.uint8)
+                        # Screenshot arrives at terminal pixel size thanks to
+                        # deviceScaleFactor — no resize needed, just clip to bounds
+                        h, w = min(arr.shape[0], pb.height), min(arr.shape[1], pb.width)
+                        pb.pixels[:h, :w] = arr[:h, :w]
                     except Exception as e:
-                        # Show error in HUD instead of silently dropping
                         pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
 
                     needs_refresh = False
