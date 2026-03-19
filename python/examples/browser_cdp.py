@@ -172,6 +172,12 @@ def main() -> None:
                         _, direction, cx, cy = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
+                # Pump Playwright's event loop so CDP events dispatch
+                try:
+                    page.evaluate("0")
+                except Exception:
+                    pass
+
                 # Render latest frame from CDP
                 with lock:
                     frame_data = latest_frame["data"]
