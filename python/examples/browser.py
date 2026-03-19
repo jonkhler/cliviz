@@ -133,7 +133,17 @@ def main() -> None:
         ctx, layout_w, layout_h, scale = make_context(
             browser, args.width, pb.width, pb.height)
         page = ctx.new_page()
+        # Block Fullscreen API before page JS runs
+        ctx.add_init_script("""
+            document.documentElement.requestFullscreen = () => Promise.resolve();
+            Element.prototype.requestFullscreen = () => Promise.resolve();
+            document.exitFullscreen = () => Promise.resolve();
+        """)
         page.goto(url, wait_until="domcontentloaded")
+        page.add_style_tag(content="""
+            video { max-width: 100vw !important; max-height: 100vh !important;
+                    object-fit: contain !important; }
+        """)
 
         enable_mouse()
         needs_refresh = True

@@ -147,10 +147,16 @@ def main() -> None:
 
         page.goto(url, wait_until="domcontentloaded")
 
-        # Force videos to stay within viewport (prevent fullscreen overflow)
+        # Block Fullscreen API — videos stay inline at viewport size
+        page.add_init_script("""
+            document.documentElement.requestFullscreen = () => Promise.resolve();
+            Element.prototype.requestFullscreen = () => Promise.resolve();
+            document.exitFullscreen = () => Promise.resolve();
+        """)
+        # Also constrain via CSS as belt-and-suspenders
         page.add_style_tag(content="""
-            video, iframe { max-width: 100vw !important; max-height: 100vh !important; }
-            *:fullscreen { width: 100vw !important; height: 100vh !important; }
+            video { max-width: 100vw !important; max-height: 100vh !important;
+                    object-fit: contain !important; }
         """)
         enable_mouse()
 
