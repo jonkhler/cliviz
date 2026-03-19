@@ -17,72 +17,23 @@ import threading
 
 import numpy as np
 from PIL import Image
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import CDPSession, Page, sync_playwright
 
 import cliviz
+from browser import (  # shared helpers
+    apply_page_styles, copy_screenshot, disable_mouse, enable_mouse,
+    layout_height, make_context, read_input, terminal_to_css,
+)
 
 
-# ── Mouse tracking ──
-
-
-def enable_mouse():
-    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1006h")
-    sys.stdout.buffer.flush()
-
-
-def disable_mouse():
-    sys.stdout.buffer.write(b"\x1b[?1000l\x1b[?1006l")
-    sys.stdout.buffer.flush()
-
-
-def read_input(fd: int) -> list:
-    events = []
-    buf = b""
-    while select.select([fd], [], [], 0)[0]:
-        chunk = os.read(fd, 256)
-        if not chunk:
-            break
-        buf += chunk
-
-    i = 0
-    while i < len(buf):
-        b = buf[i]
-        if b == 0x1B and i + 2 < len(buf) and buf[i + 1] == ord("[") and buf[i + 2] == ord("<"):
-            end = buf.find(ord("M"), i + 3)
-            is_release = False
-            if end == -1:
-                end = buf.find(ord("m"), i + 3)
-                is_release = True
-            if end == -1:
-                i += 1
-                continue
-            parts = buf[i + 3:end].decode("ascii", errors="ignore").split(";")
-            if len(parts) == 3:
-                cb, cx, cy = int(parts[0]), int(parts[1]), int(parts[2])
-                button = cb & 0x03
-                is_motion = bool(cb & 32)
-                is_wheel = bool(cb & 64)
-                if is_wheel:
-                    direction = "up" if button == 0 else "down"
-                    events.append(("scroll", direction, cx, cy))
-                elif not is_motion:
-                    events.append(("mouse", button, cx, cy, not is_release))
-            i = end + 1
-        elif b == 0x1B:
-            i += 1
-            while i < len(buf) and buf[i] not in range(0x40, 0x7F):
-                i += 1
-            i += 1
-        elif b < 0x20:
-            events.append(("key", chr(b)))
-            i += 1
-        else:
-            events.append(("key", chr(b)))
-            i += 1
-    return events
-
-
-# ── Main ──
+def start_screencast(cdp: CDPSession, pb: cliviz.PixelBuffer) -> None:
+    cdp.send("Page.startScreencast", {
+        "format": "jpeg",
+        "quality": 50,
+        "maxWidth": pb.width,
+        "maxHeight": pb.height,
+        "everyNthFrame": 1,
+    })
 
 
 def main() -> None:
@@ -90,45 +41,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="CDP screencast terminal browser")
     parser.add_argument("url", nargs="?", default="https://news.ycombinator.com")
     parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
-    parser.add_argument("--width", type=int, default=1280,
-                        help="Layout width in CSS pixels (default 1280)")
+    parser.add_argument("--width", type=int, default=1280, help="Layout width in CSS pixels")
     args = parser.parse_args()
-
-    url = args.url
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=60)
+        layout_w = args.width
 
-        def make_context(browser, layout_w: int, px_w: int, px_h: int):
-            scale = max(0.1, min(4.0, px_w / layout_w))
-            layout_h = int(px_h / scale)
-            return browser.new_context(
-                viewport={"width": layout_w, "height": layout_h},
-                device_scale_factor=scale,
-            ), layout_w, layout_h, scale
-
-        def copy_frame(jpg_bytes: bytes, pb: "cliviz.PixelBuffer") -> None:
-            arr = np.array(Image.open(io.BytesIO(jpg_bytes)).convert("RGB"), dtype=np.uint8)
-            pb.pixels[:] = 0
-            if arr.shape[0] == pb.height and arr.shape[1] == pb.width:
-                pb.pixels[:] = arr
-            else:
-                img = Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR)
-                pb.pixels[:] = np.array(img, dtype=np.uint8)
-
-        launch_opts: dict = {"headless": True}
-        if args.proxy:
-            launch_opts["proxy"] = {"server": args.proxy}
-
-        browser = pw.chromium.launch(**launch_opts)
-        ctx, layout_w, layout_h, scale = make_context(
-            browser, args.width, pb.width, pb.height)
+        browser = pw.chromium.launch(headless=True,
+                                     **({"proxy": {"server": args.proxy}} if args.proxy else {}))
+        ctx = make_context(browser, layout_w, layout_height(layout_w, pb), args.proxy)
         page = ctx.new_page()
 
-        # CDP screencast: browser pushes frames at terminal pixel dimensions
-        cdp = page.context.new_cdp_session(page)
-        latest_frame = {"data": None}
+        cdp = ctx.new_cdp_session(page)
+        latest_frame: dict[str, bytes | None] = {"data": None}
         lock = threading.Lock()
 
         def on_frame(params: dict) -> None:
@@ -137,50 +64,27 @@ def main() -> None:
             cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]})
 
         cdp.on("Page.screencastFrame", on_frame)
-        cdp.send("Page.startScreencast", {
-            "format": "jpeg",
-            "quality": 50,
-            "maxWidth": pb.width,
-            "maxHeight": pb.height,
-            "everyNthFrame": 1,
-        })
+        start_screencast(cdp, pb)
 
-        page.goto(url, wait_until="domcontentloaded")
-
-        # Block Fullscreen API — videos stay inline at viewport size
-        page.add_init_script("""
-            document.documentElement.requestFullscreen = () => Promise.resolve();
-            Element.prototype.requestFullscreen = () => Promise.resolve();
-            document.exitFullscreen = () => Promise.resolve();
-        """)
-        # Also constrain via CSS as belt-and-suspenders
-        page.add_style_tag(content="""
-            video { max-width: 100vw !important; max-height: 100vh !important;
-                    object-fit: contain !important; }
-        """)
+        page.goto(args.url, wait_until="domcontentloaded")
+        apply_page_styles(page)
         enable_mouse()
 
         try:
             while True:
                 pacer.pace()
 
-                # Resize handling (font size change → different terminal cols/rows)
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    scale = pb.width / layout_w
-                    # Update screencast dimensions for new terminal size
+                    page.set_viewport_size({"width": layout_w,
+                                            "height": layout_height(layout_w, pb)})
                     cdp.send("Page.stopScreencast")
-                    cdp.send("Page.startScreencast", {
-                        "format": "jpeg", "quality": 50,
-                        "maxWidth": pb.width, "maxHeight": pb.height,
-                        "everyNthFrame": 1,
-                    })
+                    start_screencast(cdp, pb)
 
-                # Input
                 for event in read_input(sys.stdin.fileno()):
                     if event[0] == "key":
                         ch = event[1]
-                        if ch == "\x11":  # Ctrl-Q
+                        if ch == "\x11":
                             return
                         elif ch == "\r":
                             page.keyboard.press("Enter")
@@ -190,32 +94,29 @@ def main() -> None:
                             page.keyboard.press("Tab")
                         else:
                             page.keyboard.type(ch)
-
                     elif event[0] == "mouse":
-                        _, button, cx, cy, pressed = event
-                        if pressed and button == 0:
-                            px = (cx - 1)
-                            py = (cy - 1) * 2
-                            page.mouse.click(px / scale, py / scale)
-
+                        _, btn, cx, cy, pressed = event
+                        if pressed and btn == 0:
+                            bx, by = terminal_to_css(cx, cy, pb, layout_w,
+                                                     page.viewport_size["height"])
+                            page.mouse.click(bx, by)
                     elif event[0] == "scroll":
-                        _, direction, cx, cy = event
+                        _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
-                # Pump Playwright's event loop so CDP events dispatch
+                # Pump Playwright event loop so CDP callbacks fire
                 try:
                     page.evaluate("0")
                 except Exception:
                     pass
 
-                # Render latest frame from CDP
                 with lock:
                     frame_data = latest_frame["data"]
                     latest_frame["data"] = None
 
                 if frame_data:
                     try:
-                        copy_frame(base64.b64decode(frame_data), pb)
+                        copy_screenshot(base64.b64decode(frame_data), pb)
                     except Exception:
                         pass
 
