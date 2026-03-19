@@ -81,11 +81,27 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
         opts["proxy"] = {"server": proxy}
     ctx = browser.new_context(**opts)
     ctx.add_init_script("""
+        // Block fullscreen API entirely
         Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
         Object.defineProperty(document, 'fullscreen', {get: () => false});
         document.documentElement.requestFullscreen = () => Promise.resolve();
         Element.prototype.requestFullscreen = () => Promise.resolve();
         document.exitFullscreen = () => Promise.resolve();
+
+        // Inject CSS early to constrain all media to viewport
+        const style = document.createElement('style');
+        style.textContent = `
+            video, iframe, embed, object {
+                max-width: 100vw !important;
+                max-height: 100vh !important;
+                width: 100% !important;
+                height: auto !important;
+                object-fit: contain !important;
+            }
+            body { overflow: hidden !important; }
+        `;
+        document.addEventListener('DOMContentLoaded', () => document.head?.appendChild(style));
+        document.head ? document.head.appendChild(style) : document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
     """)
     return ctx
 
