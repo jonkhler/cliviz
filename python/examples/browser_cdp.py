@@ -125,38 +125,23 @@ def main() -> None:
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
-                # Apply constraints and discard stale frame; pump to get fresh one
+                # Apply video constraints synchronously, then take a fresh screenshot.
+                # CDP screencast frames are async and may arrive before constraints run;
+                # a synchronous screenshot always reflects the current constrained state.
                 try:
                     apply_page_styles(page)
-                    with lock:
-                        latest_frame["data"] = None  # discard stale
-                    page.evaluate("0")  # trigger new frame after constraint
+                    vp = page.viewport_size
+                    jpg = page.screenshot(
+                        type="jpeg", quality=50,
+                        clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
+                    )
+                    copy_screenshot(jpg, pb)
                 except Exception:
                     pass
 
+                # Drain the screencast queue (keep CDP alive but ignore frames now)
                 with lock:
-                    frame_data = latest_frame["data"]
                     latest_frame["data"] = None
-
-                if frame_data:
-                    try:
-                        jpg = base64.b64decode(frame_data)
-                        if not hasattr(main, '_fc'):
-                            main._fc = 0
-                        main._fc += 1
-                        if main._fc % 30 == 0:
-                            open('/tmp/browser_frame.jpg', 'wb').write(jpg)
-                            # Also log video dims at the moment of capture
-                            try:
-                                vinfo = page.evaluate("() => [...document.querySelectorAll('video')].map(v => [v.offsetWidth, v.offsetHeight])")
-                                import sys as _sys
-                                _sys.stderr.write(f"frame {main._fc}: {__import__('PIL.Image',fromlist=['Image']).Image.open(__import__('io').BytesIO(jpg)).size} videos={vinfo}\n")
-                                _sys.stderr.flush()
-                            except Exception:
-                                pass
-                        copy_screenshot(jpg, pb)
-                    except Exception:
-                        pass
 
                 pb.encode_all()
                 pb.draw_text(1, 0,
