@@ -88,16 +88,13 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
         Element.prototype.requestFullscreen = () => Promise.resolve();
         document.exitFullscreen = () => Promise.resolve();
 
-        // Inject CSS early to constrain all media to viewport
+        // Constrain fullscreen video to viewport
         const style = document.createElement('style');
         style.textContent = `
-            * { max-width: 100vw !important; max-height: 100vh !important; }
-            video, iframe, embed, object {
-                width: 100vw !important;
-                height: 100vh !important;
+            video:fullscreen, video:-webkit-full-screen {
+                width: 100vw !important; height: 100vh !important;
                 object-fit: contain !important;
             }
-            html, body { overflow: hidden !important; width: 100vw !important; height: 100vh !important; }
         `;
         const inject = () => { if (document.head) document.head.appendChild(style); };
         inject();
@@ -229,9 +226,13 @@ def main() -> None:
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
                         needs_refresh = True
 
-                # Always refresh — page may update from navigation, animations, etc.
+                # Always refresh — clip to viewport so overflow doesn't cause crop
                 try:
-                    copy_screenshot(page.screenshot(type="jpeg", quality=60), pb)
+                    vp = page.viewport_size
+                    copy_screenshot(page.screenshot(
+                        type="jpeg", quality=60,
+                        clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
+                    ), pb)
                 except Exception as e:
                     pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
                 pb.encode_all()
