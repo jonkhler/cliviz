@@ -1,7 +1,7 @@
 """Interactive web browser in the terminal via headless Chromium.
 
 Install: uv pip install ".[browser]" && playwright install chromium
-Run:     uv run python python/examples/browser.py [url] [--proxy ...]
+Run:     uv run python python/examples/browser.py [url] [--proxy socks5://localhost:1080]
 Keys:    mouse click, scroll, type text. Ctrl-Q=quit
 """
 
@@ -12,7 +12,7 @@ import sys
 
 import numpy as np
 from PIL import Image
-from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright.sync_api import BrowserContext, CDPSession, Page, sync_playwright
 
 import cliviz
 
@@ -72,42 +72,56 @@ def read_input(fd: int) -> list:
     return events
 
 
-# ── Browser helpers ──
+# ── Browser setup ──
 
 def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> BrowserContext:
-    """Fixed deviceScaleFactor=1 context. Layout dimensions are stable across resizes."""
+    """Create browser context with fullscreen blocking and video constraints."""
     opts: dict = {"viewport": {"width": layout_w, "height": layout_h}}
     if proxy:
         opts["proxy"] = {"server": proxy}
     ctx = browser.new_context(**opts)
     ctx.add_init_script("""
-        // Block fullscreen API entirely
+        // Block fullscreen API
         Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
         Object.defineProperty(document, 'fullscreen', {get: () => false});
         document.documentElement.requestFullscreen = () => Promise.resolve();
         Element.prototype.requestFullscreen = () => Promise.resolve();
         document.exitFullscreen = () => Promise.resolve();
 
-        // Intercept video element creation and constrain size at the prototype level
-        // This runs before any page JS can set width/height attributes
-        const origCreate = document.createElement.bind(document);
-        document.createElement = function(tag, ...args) {
-            const el = origCreate(tag, ...args);
-            if (tag.toLowerCase() === 'video') {
-                const style = document.createElement('style');
-                style.textContent = 'video { max-width: 100vw !important; max-height: 100vh !important; width: 100% !important; height: auto !important; object-fit: contain !important; }';
-                (document.head || document.documentElement).appendChild(style);
-                document.createElement = origCreate; // only inject once
-            }
-            return el;
-        };
-        // Also inject style immediately in case video elements exist
-        const s = origCreate('style');
-        s.textContent = 'video { max-width: 100vw !important; max-height: 100vh !important; width: 100% !important; height: auto !important; object-fit: contain !important; }';
-        (document.head || document.documentElement).appendChild(s);
+        // Open all links in same tab
+        document.addEventListener('click', e => {
+            const a = e.target.closest('a');
+            if (a) a.removeAttribute('target');
+        });
     """)
     return ctx
 
+
+def set_screen_metrics(cdp: CDPSession, w: int, h: int) -> None:
+    """Tell Chromium the screen is exactly our layout size (prevents fullscreen overflow)."""
+    cdp.send("Emulation.setDeviceMetricsOverride", {
+        "width": w, "height": h,
+        "screenWidth": w, "screenHeight": h,
+        "deviceScaleFactor": 1, "mobile": False,
+    })
+
+
+# ── Coordinate mapping ──
+
+def terminal_to_css(
+    cx: int, cy: int, pb: cliviz.PixelBuffer,
+    layout_w: int, layout_h: int,
+) -> tuple[float, float]:
+    """Map terminal cell (1-based) to browser CSS pixel coordinates."""
+    return (cx - 1) / pb.width * layout_w, (cy - 1) * 2 / pb.height * layout_h
+
+
+def layout_height(layout_w: int, pb: cliviz.PixelBuffer) -> int:
+    """Browser layout height matching terminal aspect ratio."""
+    return max(100, int(layout_w * pb.height / pb.width))
+
+
+# ── Screenshot ──
 
 _CONSTRAIN_VIDEOS_JS = """
     document.querySelectorAll('video').forEach(v => {
@@ -120,36 +134,27 @@ _CONSTRAIN_VIDEOS_JS = """
 """
 
 
-def apply_page_styles(page: Page) -> None:
-    """Constrain video elements — must be called synchronously before screenshot."""
+def capture(page: Page, pb: cliviz.PixelBuffer) -> None:
+    """Constrain videos then take a clipped screenshot into the pixel buffer."""
     try:
         page.evaluate(_CONSTRAIN_VIDEOS_JS)
     except Exception:
         pass
-
-
-def terminal_to_css(
-    cx: int, cy: int, pb: cliviz.PixelBuffer,
-    layout_w: int, layout_h: int,
-) -> tuple[float, float]:
-    """Map terminal cell (1-based) to browser CSS pixel coordinates."""
-    return (cx - 1) / pb.width * layout_w, (cy - 1) * 2 / pb.height * layout_h
-
-
-def copy_screenshot(jpg: bytes, pb: cliviz.PixelBuffer) -> None:
-    """Decode JPEG into pixel buffer, resizing as needed."""
-    arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
-    pb.pixels[:] = 0
-    if arr.shape[:2] == (pb.height, pb.width):
-        pb.pixels[:] = arr
-    else:
-        img = Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR)
-        pb.pixels[:] = np.array(img, dtype=np.uint8)
-
-
-def layout_height(layout_w: int, pb: cliviz.PixelBuffer) -> int:
-    """Compute browser layout height to match terminal aspect ratio."""
-    return max(100, int(layout_w * pb.height / pb.width))
+    try:
+        vp = page.viewport_size
+        jpg = page.screenshot(
+            type="jpeg", quality=60,
+            clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
+        )
+        arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
+        pb.pixels[:] = 0
+        if arr.shape[:2] == (pb.height, pb.width):
+            pb.pixels[:] = arr
+        else:
+            img = Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR)
+            pb.pixels[:] = np.array(img, dtype=np.uint8)
+    except Exception:
+        pass
 
 
 # ── Main ──
@@ -159,7 +164,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Terminal web browser")
     parser.add_argument("url", nargs="?", default="https://news.ycombinator.com")
     parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
-    parser.add_argument("--width", type=int, default=1280, help="Layout width in CSS pixels")
+    parser.add_argument("--width", type=int, default=1280,
+                        help="Layout width in CSS pixels (default 1280)")
     args = parser.parse_args()
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
@@ -176,21 +182,10 @@ def main() -> None:
         ctx = make_context(browser, layout_w, lh, args.proxy)
         page = ctx.new_page()
 
-        # Force all links to open in the same tab
-        ctx.add_init_script("document.addEventListener('click', e => { const a = e.target.closest('a'); if (a) a.removeAttribute('target'); })")
-
-        # Tell Chromium the "screen" is exactly our layout size so fullscreen
-        # video expands to layout_w × lh instead of the OS screen size
         cdp = ctx.new_cdp_session(page)
-        cdp.send("Emulation.setDeviceMetricsOverride", {
-            "width": layout_w, "height": lh,
-            "screenWidth": layout_w, "screenHeight": lh,
-            "deviceScaleFactor": 1, "mobile": False,
-        })
+        set_screen_metrics(cdp, layout_w, lh)
 
         page.goto(args.url, wait_until="domcontentloaded")
-        apply_page_styles(page)
-
         enable_mouse()
 
         try:
@@ -201,12 +196,7 @@ def main() -> None:
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
                     lh = layout_height(layout_w, pb)
                     page.set_viewport_size({"width": layout_w, "height": lh})
-                    cdp.send("Emulation.setDeviceMetricsOverride", {
-                        "width": layout_w, "height": lh,
-                        "screenWidth": layout_w, "screenHeight": lh,
-                        "deviceScaleFactor": 1, "mobile": False,
-                    })
-                    needs_refresh = True
+                    set_screen_metrics(cdp, layout_w, lh)
 
                 for event in read_input(sys.stdin.fileno()):
                     if event[0] == "key":
@@ -221,32 +211,17 @@ def main() -> None:
                             page.keyboard.press("Tab")
                         else:
                             page.keyboard.type(ch)
-                        needs_refresh = True
                     elif event[0] == "mouse":
                         _, btn, cx, cy, pressed = event
                         if pressed and btn == 0:
                             bx, by = terminal_to_css(cx, cy, pb, layout_w,
                                                      page.viewport_size["height"])
                             page.mouse.click(bx, by)
-                            needs_refresh = True
                     elif event[0] == "scroll":
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
-                        needs_refresh = True
 
-                # Constrain videos each frame (players re-set styles after load)
-                apply_page_styles(page)
-
-                # Always refresh
-                try:
-                    vp = page.viewport_size
-                    jpg = page.screenshot(
-                        type="jpeg", quality=60,
-                        clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
-                    )
-                    copy_screenshot(jpg, pb)
-                except Exception as e:
-                    pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
+                capture(page, pb)
                 pb.encode_all()
                 pb.draw_text(1, 0,
                              f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
@@ -254,6 +229,7 @@ def main() -> None:
                 pb.present()
 
         finally:
+            cdp.detach()
             disable_mouse()
             browser.close()
 
