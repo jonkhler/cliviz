@@ -133,8 +133,11 @@ def main() -> None:
         pacer = cliviz.FramePacer(target_fps=30)
         layout_w = args.width
 
-        browser = pw.chromium.launch(headless=True,
-                                     **({"proxy": {"server": args.proxy}} if args.proxy else {}))
+        browser = pw.chromium.launch(
+            headless=True,
+            args=["--disable-features=FullscreenWithinTab", "--kiosk"],
+            **({"proxy": {"server": args.proxy}} if args.proxy else {}),
+        )
         ctx = make_context(browser, layout_w, layout_height(layout_w, pb), args.proxy)
         page = ctx.new_page()
         page.goto(args.url, wait_until="domcontentloaded")
