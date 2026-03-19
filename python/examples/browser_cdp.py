@@ -152,12 +152,9 @@ def main() -> None:
                 # Resize handling (font size change → different terminal cols/rows)
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    ctx, layout_w, layout_h, scale = make_context(
-                        browser, args.width, pb.width, pb.height)
-                    page = ctx.new_page()
-                    page.goto(page.url, wait_until="domcontentloaded")
-                    cdp = page.context.new_cdp_session(page)
-                    cdp.on("Page.screencastFrame", on_frame)
+                    scale = pb.width / layout_w
+                    # Update screencast dimensions for new terminal size
+                    cdp.send("Page.stopScreencast")
                     cdp.send("Page.startScreencast", {
                         "format": "jpeg", "quality": 50,
                         "maxWidth": pb.width, "maxHeight": pb.height,

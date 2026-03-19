@@ -133,10 +133,8 @@ def main() -> None:
                 # Handle terminal resize (font size change → different cols/rows)
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    ctx, layout_w, layout_h, scale = make_context(
-                        browser, args.width, pb.width, pb.height)
-                    page = ctx.new_page()
-                    page.goto(page.url, wait_until="domcontentloaded")
+                    # Recompute scale for new terminal size; layout stays fixed
+                    scale = pb.width / layout_w
                     needs_refresh = True
 
                 for event in read_input(sys.stdin.fileno()):
