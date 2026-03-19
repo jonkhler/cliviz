@@ -111,17 +111,17 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
 
 _CONSTRAIN_VIDEOS_JS = """
     document.querySelectorAll('video').forEach(v => {
-        v.style.setProperty('max-width',  '100vw',     'important');
-        v.style.setProperty('max-height', '100vh',     'important');
-        v.style.setProperty('width',      '100%',      'important');
-        v.style.setProperty('height',     'auto',      'important');
-        v.style.setProperty('object-fit', 'contain',   'important');
+        v.style.setProperty('max-width',  '100vw',   'important');
+        v.style.setProperty('max-height', '100vh',   'important');
+        v.style.setProperty('width',      '100%',    'important');
+        v.style.setProperty('height',     'auto',    'important');
+        v.style.setProperty('object-fit', 'contain', 'important');
     });
 """
 
 
 def apply_page_styles(page: Page) -> None:
-    """Run after every navigation to keep videos within viewport."""
+    """Constrain video elements — must be called synchronously before screenshot."""
     try:
         page.evaluate(_CONSTRAIN_VIDEOS_JS)
     except Exception:

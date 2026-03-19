@@ -125,10 +125,10 @@ def main() -> None:
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
-                # Pump event loop + re-apply video constraints
+                # Apply video constraints, then pump event loop to trigger a new frame
                 try:
-                    page.evaluate("0")
                     apply_page_styles(page)
+                    page.evaluate("0")
                 except Exception:
                     pass
 
