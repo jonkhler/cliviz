@@ -167,5 +167,10 @@ NB_MODULE(_native, mod) {
             self.inner->draw_text(col, row, text.c_str(), fg_r, fg_g, fg_b, bg_r, bg_g, bg_b);
         }, "col"_a, "row"_a, "text"_a,
            "fg_r"_a, "fg_g"_a, "fg_b"_a,
-           "bg_r"_a = 0, "bg_g"_a = 0, "bg_b"_a = 0);
+           "bg_r"_a = 0, "bg_g"_a = 0, "bg_b"_a = 0)
+        .def("draw_text_fg", [](PyPixelBuffer& self, uint32_t col, uint32_t row,
+                                const std::string& text,
+                                uint8_t fg_r, uint8_t fg_g, uint8_t fg_b) {
+            self.inner->draw_text_fg(col, row, text.c_str(), fg_r, fg_g, fg_b);
+        }, "col"_a, "row"_a, "text"_a, "fg_r"_a, "fg_g"_a, "fg_b"_a);
 }

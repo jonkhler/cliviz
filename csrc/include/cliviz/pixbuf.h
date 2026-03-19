@@ -54,6 +54,11 @@ struct PixelBuffer {
                    uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
                    uint8_t bg_r, uint8_t bg_g, uint8_t bg_b);
 
+    // Draw text preserving the existing background color (transparency).
+    // Only sets fg color and glyph; bg comes from whatever was encoded.
+    void draw_text_fg(uint32_t col, uint32_t row, const char* text,
+                      uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
+
     ~PixelBuffer();
 
 private:

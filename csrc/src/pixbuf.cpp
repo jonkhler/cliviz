@@ -206,4 +206,17 @@ void PixelBuffer::draw_text(uint32_t col, uint32_t row, const char* text,
     }
 }
 
+void PixelBuffer::draw_text_fg(uint32_t col, uint32_t row, const char* text,
+                               uint8_t fg_r, uint8_t fg_g, uint8_t fg_b) {
+    if (row >= fb->height) return;
+    for (uint32_t i = 0; text[i] != '\0' && col + i < fb->width; ++i) {
+        uint32_t cell_idx = row * fb->width + col + i;
+        Cell c = fb->back[cell_idx];  // preserve existing bg
+        c.fg[0] = fg_r; c.fg[1] = fg_g; c.fg[2] = fg_b;
+        c.ch = static_cast<uint16_t>(text[i]);
+        fb->back[cell_idx] = c;
+        fb->dirty_mask[cell_idx >> 6] |= (1ULL << (cell_idx & 63));
+    }
+}
+
 } // namespace cliviz
