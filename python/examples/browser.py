@@ -94,8 +94,13 @@ def main() -> None:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=8)
 
+        # Browser renders at normal resolution, we downscale to terminal pixels
+        vp_w, vp_h = 1280, 800
+        scale_x = vp_w / pb.width
+        scale_y = vp_h / pb.height
+
         browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": pb.width, "height": pb.height})
+        page = browser.new_page(viewport={"width": vp_w, "height": vp_h})
         page.goto(url, wait_until="domcontentloaded")
 
         enable_mouse()
@@ -131,22 +136,22 @@ def main() -> None:
                     elif event[0] == "mouse":
                         _, button, cx, cy, pressed = event
                         if pressed and button == 0:
-                            # Terminal coords are 1-based, and each cell = 1 col, 2 pixel rows
-                            px = cx - 1  # 0-based pixel x
-                            py = (cy - 1) * 2  # 0-based pixel y (approx)
-                            page.mouse.click(px, py)
+                            # Terminal cell (1-based) → pixel → browser coords
+                            bx = (cx - 1) * scale_x
+                            by = (cy - 1) * 2 * scale_y / 2  # cell row → pixel row, then scale
+                            page.mouse.click(bx, by)
                             needs_refresh = True
 
                     elif event[0] == "scroll":
                         _, direction, cx, cy = event
-                        delta = -120 if direction == "up" else 120
+                        delta = -300 if direction == "up" else 300
                         page.mouse.wheel(0, delta)
                         needs_refresh = True
 
                 if needs_refresh:
                     png = page.screenshot(type="png")
                     img = Image.open(io.BytesIO(png)).convert("RGB")
-                    img = img.resize((pb.width, pb.height), Image.NEAREST)
+                    img = img.resize((pb.width, pb.height), Image.LANCZOS)
                     pb.pixels[:] = np.array(img, dtype=np.uint8)
                     needs_refresh = False
 
