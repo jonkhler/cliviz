@@ -1,8 +1,8 @@
 """Interactive web browser in the terminal via headless Chromium.
 
 Install: uv pip install ".[browser]" && playwright install chromium
-Run:     uv run python python/examples/browser.py [url]
-Keys:    mouse click, scroll, type text. Ctrl-Q=quit, Ctrl-L=new URL
+Run:     uv run python python/examples/browser.py [url] [--proxy socks5://localhost:1080]
+Keys:    mouse click, scroll, type text. Ctrl-Q=quit
 """
 
 import io
@@ -88,15 +88,25 @@ def read_input(fd: int) -> list:
 
 
 def main() -> None:
-    url = sys.argv[1] if len(sys.argv) > 1 else "https://news.ycombinator.com"
+    import argparse
+    parser = argparse.ArgumentParser(description="Terminal web browser")
+    parser.add_argument("url", nargs="?", default="https://news.ycombinator.com")
+    parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
+    parser.add_argument("--viewport", default="600x400", help="Browser viewport WxH")
+    args = parser.parse_args()
+
+    url = args.url
+    vp_w, vp_h = (int(x) for x in args.viewport.split("x"))
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=8)
 
-        # Mobile-ish viewport — readable at terminal resolution
-        vp_w, vp_h = 600, 400
-        browser = pw.chromium.launch(headless=True)
+        launch_opts: dict = {"headless": True}
+        if args.proxy:
+            launch_opts["proxy"] = {"server": args.proxy}
+
+        browser = pw.chromium.launch(**launch_opts)
         page = browser.new_page(viewport={"width": vp_w, "height": vp_h})
         page.goto(url, wait_until="domcontentloaded")
 
