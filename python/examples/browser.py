@@ -91,17 +91,17 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
         // Inject CSS early to constrain all media to viewport
         const style = document.createElement('style');
         style.textContent = `
+            * { max-width: 100vw !important; max-height: 100vh !important; }
             video, iframe, embed, object {
-                max-width: 100vw !important;
-                max-height: 100vh !important;
-                width: 100% !important;
-                height: auto !important;
+                width: 100vw !important;
+                height: 100vh !important;
                 object-fit: contain !important;
             }
-            body { overflow: hidden !important; }
+            html, body { overflow: hidden !important; width: 100vw !important; height: 100vh !important; }
         `;
-        document.addEventListener('DOMContentLoaded', () => document.head?.appendChild(style));
-        document.head ? document.head.appendChild(style) : document.addEventListener('DOMContentLoaded', () => document.head.appendChild(style));
+        const inject = () => { if (document.head) document.head.appendChild(style); };
+        inject();
+        document.addEventListener('DOMContentLoaded', inject);
     """)
     return ctx
 
