@@ -88,20 +88,23 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
         Element.prototype.requestFullscreen = () => Promise.resolve();
         document.exitFullscreen = () => Promise.resolve();
 
-        // Force all video elements to fit viewport regardless of inline styles
-        const constrainVideos = () => {
-            document.querySelectorAll('video').forEach(v => {
-                v.style.setProperty('max-width', '100vw', 'important');
-                v.style.setProperty('max-height', '100vh', 'important');
-                v.style.setProperty('width', '100%', 'important');
-                v.style.setProperty('height', 'auto', 'important');
-                v.style.setProperty('object-fit', 'contain', 'important');
-            });
+        // Intercept video element creation and constrain size at the prototype level
+        // This runs before any page JS can set width/height attributes
+        const origCreate = document.createElement.bind(document);
+        document.createElement = function(tag, ...args) {
+            const el = origCreate(tag, ...args);
+            if (tag.toLowerCase() === 'video') {
+                const style = document.createElement('style');
+                style.textContent = 'video { max-width: 100vw !important; max-height: 100vh !important; width: 100% !important; height: auto !important; object-fit: contain !important; }';
+                (document.head || document.documentElement).appendChild(style);
+                document.createElement = origCreate; // only inject once
+            }
+            return el;
         };
-        // Run now, on DOM ready, and watch for new video elements
-        constrainVideos();
-        document.addEventListener('DOMContentLoaded', constrainVideos);
-        new MutationObserver(constrainVideos).observe(document, {childList: true, subtree: true});
+        // Also inject style immediately in case video elements exist
+        const s = origCreate('style');
+        s.textContent = 'video { max-width: 100vw !important; max-height: 100vh !important; width: 100% !important; height: auto !important; object-fit: contain !important; }';
+        (document.head || document.documentElement).appendChild(s);
     """)
     return ctx
 
