@@ -106,21 +106,23 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
     return ctx
 
 
+_CONSTRAIN_VIDEOS_JS = """
+    document.querySelectorAll('video').forEach(v => {
+        v.style.setProperty('max-width',  '100vw',     'important');
+        v.style.setProperty('max-height', '100vh',     'important');
+        v.style.setProperty('width',      '100%',      'important');
+        v.style.setProperty('height',     'auto',      'important');
+        v.style.setProperty('object-fit', 'contain',   'important');
+    });
+"""
+
+
 def apply_page_styles(page: Page) -> None:
-    page.add_style_tag(content="""
-        video, video:fullscreen, video:-webkit-full-screen {
-            max-width: 100vw !important;
-            max-height: 100vh !important;
-            width: 100% !important;
-            height: auto !important;
-            object-fit: contain !important;
-        }
-        *:fullscreen, *:-webkit-full-screen {
-            max-width: 100vw !important;
-            max-height: 100vh !important;
-            overflow: hidden !important;
-        }
-    """)
+    """Run after every navigation to keep videos within viewport."""
+    try:
+        page.evaluate(_CONSTRAIN_VIDEOS_JS)
+    except Exception:
+        pass
 
 
 def terminal_to_css(
@@ -228,6 +230,9 @@ def main() -> None:
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
                         needs_refresh = True
+
+                # Constrain videos each frame (players re-set styles after load)
+                apply_page_styles(page)
 
                 # Always refresh — clip to viewport so overflow doesn't cause crop
                 try:
