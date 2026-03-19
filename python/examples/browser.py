@@ -106,12 +106,24 @@ def main() -> None:
         def make_context(browser, layout_w: int, px_w: int, px_h: int):
             """Create a browser context with deviceScaleFactor so screenshots
             arrive at terminal pixel dimensions with no resizing needed."""
-            scale = px_w / layout_w
+            # Clamp scale: Chromium rejects values outside [0.1, 4.0]
+            scale = max(0.1, min(4.0, px_w / layout_w))
             layout_h = int(px_h / scale)
             return browser.new_context(
                 viewport={"width": layout_w, "height": layout_h},
                 device_scale_factor=scale,
             ), layout_w, layout_h, scale
+
+        def copy_screenshot(jpg: bytes, pb: "cliviz.PixelBuffer") -> None:
+            """Decode screenshot and write into pixel buffer.
+            Handles size mismatches: resizes if needed, clears first."""
+            arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
+            pb.pixels[:] = 0  # clear stale content
+            if arr.shape[0] == pb.height and arr.shape[1] == pb.width:
+                pb.pixels[:] = arr
+            else:
+                img = Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR)
+                pb.pixels[:] = np.array(img, dtype=np.uint8)
 
         launch_opts: dict = {"headless": True}
         if args.proxy:
@@ -178,12 +190,7 @@ def main() -> None:
                 if needs_refresh:
                     try:
                         jpg = page.screenshot(type="jpeg", quality=60)
-                        arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"),
-                                       dtype=np.uint8)
-                        # Screenshot arrives at terminal pixel size thanks to
-                        # deviceScaleFactor — no resize needed, just clip to bounds
-                        h, w = min(arr.shape[0], pb.height), min(arr.shape[1], pb.width)
-                        pb.pixels[:h, :w] = arr[:h, :w]
+                        copy_screenshot(jpg, pb)
                     except Exception as e:
                         pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
 

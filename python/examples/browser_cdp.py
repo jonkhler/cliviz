@@ -101,12 +101,21 @@ def main() -> None:
         pacer = cliviz.FramePacer(target_fps=60)
 
         def make_context(browser, layout_w: int, px_w: int, px_h: int):
-            scale = px_w / layout_w
+            scale = max(0.1, min(4.0, px_w / layout_w))
             layout_h = int(px_h / scale)
             return browser.new_context(
                 viewport={"width": layout_w, "height": layout_h},
                 device_scale_factor=scale,
             ), layout_w, layout_h, scale
+
+        def copy_frame(jpg_bytes: bytes, pb: "cliviz.PixelBuffer") -> None:
+            arr = np.array(Image.open(io.BytesIO(jpg_bytes)).convert("RGB"), dtype=np.uint8)
+            pb.pixels[:] = 0
+            if arr.shape[0] == pb.height and arr.shape[1] == pb.width:
+                pb.pixels[:] = arr
+            else:
+                img = Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR)
+                pb.pixels[:] = np.array(img, dtype=np.uint8)
 
         launch_opts: dict = {"headless": True}
         if args.proxy:
@@ -200,12 +209,7 @@ def main() -> None:
 
                 if frame_data:
                     try:
-                        jpg_bytes = base64.b64decode(frame_data)
-                        arr = np.array(Image.open(io.BytesIO(jpg_bytes)).convert("RGB"),
-                                       dtype=np.uint8)
-                        h = min(arr.shape[0], pb.height)
-                        w = min(arr.shape[1], pb.width)
-                        pb.pixels[:h, :w] = arr[:h, :w]
+                        copy_frame(base64.b64decode(frame_data), pb)
                     except Exception:
                         pass
 
