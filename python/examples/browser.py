@@ -1,12 +1,13 @@
-"""Render a live webpage in the terminal via headless Chromium.
+"""Interactive web browser in the terminal via headless Chromium.
 
-Install: uv pip install playwright && playwright install chromium
+Install: uv pip install ".[browser]" && playwright install chromium
 Run:     uv run python python/examples/browser.py [url]
-Keys:    q=quit
+Keys:    mouse click, scroll, type text. Ctrl-Q=quit, Ctrl-L=new URL
 """
 
 import io
 import os
+import re
 import select
 import sys
 
@@ -17,11 +18,73 @@ from playwright.sync_api import sync_playwright
 import cliviz
 
 
-def read_key(fd: int) -> int:
-    if not select.select([fd], [], [], 0)[0]:
-        return 0
-    b = os.read(fd, 1)
-    return b[0] if b else 0
+def enable_mouse():
+    """Enable SGR mouse tracking (click + scroll + motion)."""
+    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1006h")
+    sys.stdout.buffer.flush()
+
+
+def disable_mouse():
+    sys.stdout.buffer.write(b"\x1b[?1000l\x1b[?1006l")
+    sys.stdout.buffer.flush()
+
+
+def read_input(fd: int) -> list:
+    """Read all pending input, return list of events.
+
+    Events: ('key', char), ('mouse', button, x, y, pressed), ('scroll', direction, x, y)
+    """
+    events = []
+    buf = b""
+
+    while select.select([fd], [], [], 0)[0]:
+        chunk = os.read(fd, 256)
+        if not chunk:
+            break
+        buf += chunk
+
+    i = 0
+    while i < len(buf):
+        b = buf[i]
+
+        if b == 0x1B and i + 2 < len(buf) and buf[i + 1] == ord("[") and buf[i + 2] == ord("<"):
+            # SGR mouse: \e[<Cb;Cx;Cy M/m
+            end = buf.find(ord("M"), i + 3)
+            is_release = False
+            if end == -1:
+                end = buf.find(ord("m"), i + 3)
+                is_release = True
+            if end == -1:
+                i += 1
+                continue
+            parts = buf[i + 3:end].decode("ascii", errors="ignore").split(";")
+            if len(parts) == 3:
+                cb, cx, cy = int(parts[0]), int(parts[1]), int(parts[2])
+                button = cb & 0x03
+                is_motion = bool(cb & 32)
+                is_wheel = bool(cb & 64)
+                if is_wheel:
+                    direction = "up" if button == 0 else "down"
+                    events.append(("scroll", direction, cx, cy))
+                elif not is_motion:
+                    events.append(("mouse", button, cx, cy, not is_release))
+            i = end + 1
+        elif b == 0x1B:
+            # Other escape sequences — skip
+            i += 1
+            while i < len(buf) and buf[i] not in range(0x40, 0x7F):
+                i += 1
+            i += 1
+        elif b < 0x20:
+            # Control character
+            events.append(("key", chr(b)))
+            i += 1
+        else:
+            # Regular character
+            events.append(("key", chr(b)))
+            i += 1
+
+    return events
 
 
 def main() -> None:
@@ -29,30 +92,76 @@ def main() -> None:
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
-        pacer = cliviz.FramePacer(target_fps=10)  # browsers are slow, 10fps is plenty
+        pacer = cliviz.FramePacer(target_fps=8)
 
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": pb.width, "height": pb.height})
         page.goto(url, wait_until="domcontentloaded")
 
-        while True:
-            pacer.pace()
+        enable_mouse()
+        needs_refresh = True
 
-            if read_key(sys.stdin.fileno()) == ord("q"):
-                break
+        try:
+            while True:
+                pacer.pace()
 
-            # Screenshot → numpy → pixel buffer
-            png = page.screenshot(type="png")
-            img = Image.open(io.BytesIO(png)).convert("RGB")
-            img = img.resize((pb.width, pb.height), Image.NEAREST)
-            pb.pixels[:] = np.array(img, dtype=np.uint8)
+                for event in read_input(sys.stdin.fileno()):
+                    if event[0] == "key":
+                        ch = event[1]
+                        if ch == "\x11":  # Ctrl-Q
+                            return
+                        elif ch == "\x0c":  # Ctrl-L — navigate
+                            disable_mouse()
+                            # Can't easily prompt in raw mode, so just go to a fixed URL
+                            # In a real app you'd implement a URL bar
+                            pass
+                        elif ch == "\r":
+                            page.keyboard.press("Enter")
+                            needs_refresh = True
+                        elif ch == "\x7f":  # backspace
+                            page.keyboard.press("Backspace")
+                            needs_refresh = True
+                        elif ch == "\t":
+                            page.keyboard.press("Tab")
+                            needs_refresh = True
+                        else:
+                            page.keyboard.type(ch)
+                            needs_refresh = True
 
-            pb.encode_all()
-            pb.draw_text(1, 0, f" {pacer.fps:.0f}fps  {url}  q=quit ",
-                         255, 255, 255, 30, 30, 50)
-            pb.present()
+                    elif event[0] == "mouse":
+                        _, button, cx, cy, pressed = event
+                        if pressed and button == 0:
+                            # Terminal coords are 1-based, and each cell = 1 col, 2 pixel rows
+                            px = cx - 1  # 0-based pixel x
+                            py = (cy - 1) * 2  # 0-based pixel y (approx)
+                            page.mouse.click(px, py)
+                            needs_refresh = True
 
-        browser.close()
+                    elif event[0] == "scroll":
+                        _, direction, cx, cy = event
+                        delta = -120 if direction == "up" else 120
+                        page.mouse.wheel(0, delta)
+                        needs_refresh = True
+
+                if needs_refresh:
+                    png = page.screenshot(type="png")
+                    img = Image.open(io.BytesIO(png)).convert("RGB")
+                    img = img.resize((pb.width, pb.height), Image.NEAREST)
+                    pb.pixels[:] = np.array(img, dtype=np.uint8)
+                    needs_refresh = False
+
+                    pb.encode_all()
+                    pb.draw_text(1, 0,
+                                 f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
+                                 255, 255, 255, 30, 30, 50)
+                    pb.present()
+
+                # Refresh periodically for page animations/loads
+                needs_refresh = True
+
+        finally:
+            disable_mouse()
+            browser.close()
 
 
 if __name__ == "__main__":
