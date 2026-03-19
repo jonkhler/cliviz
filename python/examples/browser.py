@@ -94,9 +94,10 @@ def main() -> None:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=8)
 
-        # Viewport = terminal pixel resolution. Forces mobile/responsive layouts.
+        # Normal viewport, downscale screenshot to terminal pixel resolution
+        vp_w, vp_h = 1280, 900
         browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": pb.width, "height": pb.height})
+        page = browser.new_page(viewport={"width": vp_w, "height": vp_h})
         page.goto(url, wait_until="domcontentloaded")
 
         enable_mouse()
@@ -132,9 +133,11 @@ def main() -> None:
                     elif event[0] == "mouse":
                         _, button, cx, cy, pressed = event
                         if pressed and button == 0:
-                            # Terminal cell (1-based) → pixel coords (1:1 mapping)
-                            bx = cx - 1
-                            by = (cy - 1) * 2  # cell row → pixel row (half-block = 2px/cell)
+                            # Terminal cell (1-based) → browser CSS pixel coords
+                            # cx maps to [0, pb.width] → [0, vp_w]
+                            # cy maps to [0, term.rows] → [0, vp_h] (each cell row = 2 pixel rows)
+                            bx = (cx - 1) / term.cols * vp_w
+                            by = (cy - 1) / term.rows * vp_h
                             page.mouse.click(bx, by)
                             needs_refresh = True
 
@@ -147,7 +150,8 @@ def main() -> None:
                 if needs_refresh:
                     png = page.screenshot(type="png")
                     img = Image.open(io.BytesIO(png)).convert("RGB")
-                    pb.pixels[:] = np.array(img, dtype=np.uint8)[:pb.height, :pb.width]
+                    img = img.resize((pb.width, pb.height), Image.LANCZOS)
+                    pb.pixels[:] = np.array(img, dtype=np.uint8)
                     needs_refresh = False
 
                     pb.encode_all()
