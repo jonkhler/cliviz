@@ -141,12 +141,19 @@ def main() -> None:
                 if frame_data:
                     try:
                         jpg = base64.b64decode(frame_data)
-                        # Save every 30th frame for inspection
                         if not hasattr(main, '_fc'):
                             main._fc = 0
                         main._fc += 1
                         if main._fc % 30 == 0:
                             open('/tmp/browser_frame.jpg', 'wb').write(jpg)
+                            # Also log video dims at the moment of capture
+                            try:
+                                vinfo = page.evaluate("() => [...document.querySelectorAll('video')].map(v => [v.offsetWidth, v.offsetHeight])")
+                                import sys as _sys
+                                _sys.stderr.write(f"frame {main._fc}: {__import__('PIL.Image',fromlist=['Image']).Image.open(__import__('io').BytesIO(jpg)).size} videos={vinfo}\n")
+                                _sys.stderr.flush()
+                            except Exception:
+                                pass
                         copy_screenshot(jpg, pb)
                     except Exception:
                         pass
