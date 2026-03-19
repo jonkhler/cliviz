@@ -13,6 +13,7 @@ dependencies = ["numpy>=1.24"]
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
 gpu = ["taichi>=1.7"]
+browser = ["playwright>=1.40", "pillow>=10.0"]
 
 [tool.scikit-build]
 cmake.build-type = "Release"
