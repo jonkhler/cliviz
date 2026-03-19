@@ -100,7 +100,7 @@ def main() -> None:
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
-        pacer = cliviz.FramePacer(target_fps=8)
+        pacer = cliviz.FramePacer(target_fps=30)
 
         launch_opts: dict = {"headless": True}
         if args.proxy:
@@ -168,9 +168,9 @@ def main() -> None:
 
                 if needs_refresh:
                     try:
-                        png = page.screenshot(type="png")
-                        img = Image.open(io.BytesIO(png)).convert("RGB")
-                        img = img.resize((pb.width, pb.height), Image.LANCZOS)
+                        jpg = page.screenshot(type="jpeg", quality=60)
+                        img = Image.open(io.BytesIO(jpg)).convert("RGB")
+                        img = img.resize((pb.width, pb.height), Image.BILINEAR)
                         pb.pixels[:] = np.array(img, dtype=np.uint8)
                     except Exception:
                         pass  # page still loading or navigating
@@ -181,9 +181,6 @@ def main() -> None:
                                  f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
                                  255, 255, 255, 30, 30, 50)
                     pb.present()
-
-                # Refresh periodically for page animations/loads
-                needs_refresh = True
 
         finally:
             disable_mouse()
