@@ -171,10 +171,13 @@ def main() -> None:
                     try:
                         jpg = page.screenshot(type="jpeg", quality=60)
                         img = Image.open(io.BytesIO(jpg)).convert("RGB")
+                        # Resize from browser viewport to terminal pixel dimensions
                         img = img.resize((pb.width, pb.height), Image.BILINEAR)
-                        pb.pixels[:] = np.array(img, dtype=np.uint8)
-                    except Exception:
-                        pass  # page still loading or navigating
+                        arr = np.array(img, dtype=np.uint8)
+                        pb.pixels[:arr.shape[0], :arr.shape[1]] = arr[:pb.height, :pb.width]
+                    except Exception as e:
+                        # Show error in HUD instead of silently dropping
+                        pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
 
                     needs_refresh = False
                     pb.encode_all()
