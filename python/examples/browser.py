@@ -94,8 +94,8 @@ def main() -> None:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=8)
 
-        # Normal viewport, downscale screenshot to terminal pixel resolution
-        vp_w, vp_h = 1280, 900
+        # Mobile-ish viewport — readable at terminal resolution
+        vp_w, vp_h = 600, 400
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": vp_w, "height": vp_h})
         page.goto(url, wait_until="domcontentloaded")
@@ -148,12 +148,15 @@ def main() -> None:
                         needs_refresh = True
 
                 if needs_refresh:
-                    png = page.screenshot(type="png")
-                    img = Image.open(io.BytesIO(png)).convert("RGB")
-                    img = img.resize((pb.width, pb.height), Image.LANCZOS)
-                    pb.pixels[:] = np.array(img, dtype=np.uint8)
-                    needs_refresh = False
+                    try:
+                        png = page.screenshot(type="png")
+                        img = Image.open(io.BytesIO(png)).convert("RGB")
+                        img = img.resize((pb.width, pb.height), Image.LANCZOS)
+                        pb.pixels[:] = np.array(img, dtype=np.uint8)
+                    except Exception:
+                        pass  # page still loading or navigating
 
+                    needs_refresh = False
                     pb.encode_all()
                     pb.draw_text(1, 0,
                                  f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
