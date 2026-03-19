@@ -57,6 +57,14 @@ def main() -> None:
         ctx = make_context(browser, layout_w, layout_height(layout_w, pb), args.proxy)
         page = ctx.new_page()
 
+        def handle_popup(popup) -> None:
+            url = popup.url
+            popup.close()
+            if url and url != "about:blank":
+                page.goto(url, wait_until="domcontentloaded")
+
+        page.on("popup", handle_popup)
+
         cdp = ctx.new_cdp_session(page)
         latest_frame: dict[str, bytes | None] = {"data": None}
         lock = threading.Lock()
