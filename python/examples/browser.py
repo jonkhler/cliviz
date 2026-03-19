@@ -167,11 +167,21 @@ def main() -> None:
             args=["--disable-features=FullscreenWithinTab", "--kiosk"],
             **({"proxy": {"server": args.proxy}} if args.proxy else {}),
         )
-        ctx = make_context(browser, layout_w, layout_height(layout_w, pb), args.proxy)
+        lh = layout_height(layout_w, pb)
+        ctx = make_context(browser, layout_w, lh, args.proxy)
         page = ctx.new_page()
 
         # Force all links to open in the same tab
         ctx.add_init_script("document.addEventListener('click', e => { const a = e.target.closest('a'); if (a) a.removeAttribute('target'); })")
+
+        # Tell Chromium the "screen" is exactly our layout size so fullscreen
+        # video expands to layout_w × lh instead of the OS screen size
+        cdp = ctx.new_cdp_session(page)
+        cdp.send("Emulation.setDeviceMetricsOverride", {
+            "width": layout_w, "height": lh,
+            "screenWidth": layout_w, "screenHeight": lh,
+            "deviceScaleFactor": 1, "mobile": False,
+        })
 
         page.goto(args.url, wait_until="domcontentloaded")
         apply_page_styles(page)
@@ -184,8 +194,13 @@ def main() -> None:
 
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    page.set_viewport_size({"width": layout_w,
-                                            "height": layout_height(layout_w, pb)})
+                    lh = layout_height(layout_w, pb)
+                    page.set_viewport_size({"width": layout_w, "height": lh})
+                    cdp.send("Emulation.setDeviceMetricsOverride", {
+                        "width": layout_w, "height": lh,
+                        "screenWidth": layout_w, "screenHeight": lh,
+                        "deviceScaleFactor": 1, "mobile": False,
+                    })
                     needs_refresh = True
 
                 for event in read_input(sys.stdin.fileno()):
