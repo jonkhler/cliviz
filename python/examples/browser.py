@@ -81,6 +81,8 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
         opts["proxy"] = {"server": proxy}
     ctx = browser.new_context(**opts)
     ctx.add_init_script("""
+        Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
+        Object.defineProperty(document, 'fullscreen', {get: () => false});
         document.documentElement.requestFullscreen = () => Promise.resolve();
         Element.prototype.requestFullscreen = () => Promise.resolve();
         document.exitFullscreen = () => Promise.resolve();
@@ -90,8 +92,18 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
 
 def apply_page_styles(page: Page) -> None:
     page.add_style_tag(content="""
-        video { max-width: 100vw !important; max-height: 100vh !important;
-                object-fit: contain !important; }
+        video, video:fullscreen, video:-webkit-full-screen {
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            width: 100% !important;
+            height: auto !important;
+            object-fit: contain !important;
+        }
+        *:fullscreen, *:-webkit-full-screen {
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            overflow: hidden !important;
+        }
     """)
 
 
