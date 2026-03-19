@@ -88,17 +88,20 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
         Element.prototype.requestFullscreen = () => Promise.resolve();
         document.exitFullscreen = () => Promise.resolve();
 
-        // Constrain fullscreen video to viewport
-        const style = document.createElement('style');
-        style.textContent = `
-            video:fullscreen, video:-webkit-full-screen {
-                width: 100vw !important; height: 100vh !important;
-                object-fit: contain !important;
-            }
-        `;
-        const inject = () => { if (document.head) document.head.appendChild(style); };
-        inject();
-        document.addEventListener('DOMContentLoaded', inject);
+        // Force all video elements to fit viewport regardless of inline styles
+        const constrainVideos = () => {
+            document.querySelectorAll('video').forEach(v => {
+                v.style.setProperty('max-width', '100vw', 'important');
+                v.style.setProperty('max-height', '100vh', 'important');
+                v.style.setProperty('width', '100%', 'important');
+                v.style.setProperty('height', 'auto', 'important');
+                v.style.setProperty('object-fit', 'contain', 'important');
+            });
+        };
+        // Run now, on DOM ready, and watch for new video elements
+        constrainVideos();
+        document.addEventListener('DOMContentLoaded', constrainVideos);
+        new MutationObserver(constrainVideos).observe(document, {childList: true, subtree: true});
     """)
     return ctx
 
