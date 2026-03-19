@@ -9,7 +9,14 @@ High-throughput terminal pixel engine. Treats your terminal as a pixel display u
 ## Install
 
 ```bash
-uv pip install .
+pip install cliviz
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/jonkhler/cliviz.git && cd cliviz
+pip install .
 ```
 
 ## Usage
