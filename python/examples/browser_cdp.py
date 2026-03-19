@@ -75,7 +75,6 @@ def main() -> None:
         page.goto(args.url, wait_until="domcontentloaded")
         apply_page_styles(page)
         enable_mouse()
-        screenshot_w, screenshot_h = layout_w, layout_height(layout_w, pb)
 
         try:
             while True:
@@ -83,9 +82,8 @@ def main() -> None:
 
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    new_h = layout_height(layout_w, pb)
-                    page.set_viewport_size({"width": layout_w, "height": new_h})
-                    screenshot_w, screenshot_h = layout_w, new_h
+                    page.set_viewport_size({"width": layout_w,
+                                            "height": layout_height(layout_w, pb)})
                     cdp.send("Page.stopScreencast")
                     start_screencast(cdp, pb)
 
@@ -105,7 +103,10 @@ def main() -> None:
                     elif event[0] == "mouse":
                         _, btn, cx, cy, pressed = event
                         if pressed and btn == 0:
-                            bx, by = terminal_to_css(cx, cy, pb, screenshot_w, screenshot_h)
+                            # Always use layout dimensions for CSS coords —
+                            # not screenshot dims which may be pre-scaled by CDP
+                            bx, by = terminal_to_css(cx, cy, pb, layout_w,
+                                                     page.viewport_size["height"])
                             page.mouse.click(bx, by)
                     elif event[0] == "scroll":
                         _, direction, _, _ = event
@@ -123,8 +124,7 @@ def main() -> None:
 
                 if frame_data:
                     try:
-                        screenshot_w, screenshot_h = copy_screenshot(
-                            base64.b64decode(frame_data), pb)
+                        copy_screenshot(base64.b64decode(frame_data), pb)
                     except Exception:
                         pass
 
