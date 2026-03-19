@@ -234,13 +234,14 @@ def main() -> None:
                 # Constrain videos each frame (players re-set styles after load)
                 apply_page_styles(page)
 
-                # Always refresh — clip to viewport so overflow doesn't cause crop
+                # Always refresh
                 try:
                     vp = page.viewport_size
-                    copy_screenshot(page.screenshot(
+                    jpg = page.screenshot(
                         type="jpeg", quality=60,
                         clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
-                    ), pb)
+                    )
+                    copy_screenshot(jpg, pb)
                 except Exception as e:
                     pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
                 pb.encode_all()

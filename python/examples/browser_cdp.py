@@ -125,9 +125,10 @@ def main() -> None:
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
-                # Pump Playwright event loop so CDP callbacks fire
+                # Pump event loop + re-apply video constraints
                 try:
                     page.evaluate("0")
+                    apply_page_styles(page)
                 except Exception:
                     pass
 
@@ -137,7 +138,14 @@ def main() -> None:
 
                 if frame_data:
                     try:
-                        copy_screenshot(base64.b64decode(frame_data), pb)
+                        jpg = base64.b64decode(frame_data)
+                        # Save every 30th frame for inspection
+                        if not hasattr(main, '_fc'):
+                            main._fc = 0
+                        main._fc += 1
+                        if main._fc % 30 == 0:
+                            open('/tmp/browser_frame.jpg', 'wb').write(jpg)
+                        copy_screenshot(jpg, pb)
                     except Exception:
                         pass
 
