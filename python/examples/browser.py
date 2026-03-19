@@ -194,18 +194,17 @@ def main() -> None:
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
                         needs_refresh = True
 
-                if needs_refresh:
-                    try:
-                        screenshot_w, screenshot_h = copy_screenshot(
-                            page.screenshot(type="jpeg", quality=60), pb)
-                    except Exception as e:
-                        pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
-                    needs_refresh = False
-                    pb.encode_all()
-                    pb.draw_text(1, 0,
-                                 f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
-                                 255, 255, 255, 30, 30, 50)
-                    pb.present()
+                # Always refresh — page may update from navigation, animations, etc.
+                try:
+                    screenshot_w, screenshot_h = copy_screenshot(
+                        page.screenshot(type="jpeg", quality=60), pb)
+                except Exception as e:
+                    pb.draw_text(0, 1, f"err:{e}"[:pb.width], 255, 80, 80, 0, 0, 0)
+                pb.encode_all()
+                pb.draw_text(1, 0,
+                             f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
+                             255, 255, 255, 30, 30, 50)
+                pb.present()
 
         finally:
             disable_mouse()
