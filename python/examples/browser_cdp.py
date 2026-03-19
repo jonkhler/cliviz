@@ -90,15 +90,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="CDP screencast terminal browser")
     parser.add_argument("url", nargs="?", default="https://news.ycombinator.com")
     parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
-    parser.add_argument("--viewport", default="600x400", help="Browser viewport WxH")
+    parser.add_argument("--zoom", type=int, default=4, help="CSS pixels per terminal column (default 4)")
     args = parser.parse_args()
 
     url = args.url
-    vp_w, vp_h = (int(x) for x in args.viewport.split("x"))
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=60)
+        zoom = args.zoom
+
+        # Viewport scales with terminal size
+        vp_w = term.cols * zoom
+        vp_h = term.rows * zoom * 2  # *2 because each cell row = 2 pixel rows
 
         launch_opts: dict = {"headless": True}
         if args.proxy:
@@ -133,11 +137,11 @@ def main() -> None:
             while True:
                 pacer.pace()
 
-                # Resize handling
+                # Resize handling (font size change → different terminal cols/rows)
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    vp_w = term.cols * 4
-                    vp_h = term.rows * 8
+                    vp_w = term.cols * zoom
+                    vp_h = term.rows * zoom * 2
                     page.set_viewport_size({"width": vp_w, "height": vp_h})
                     cdp.send("Page.stopScreencast")
                     cdp.send("Page.startScreencast", {

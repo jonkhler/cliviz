@@ -92,15 +92,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Terminal web browser")
     parser.add_argument("url", nargs="?", default="https://news.ycombinator.com")
     parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
-    parser.add_argument("--viewport", default="600x400", help="Browser viewport WxH")
+    parser.add_argument("--zoom", type=int, default=4, help="CSS pixels per terminal column (default 4)")
     args = parser.parse_args()
 
     url = args.url
-    vp_w, vp_h = (int(x) for x in args.viewport.split("x"))
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=30)
+        zoom = args.zoom
+        vp_w = term.cols * zoom
+        vp_h = term.rows * zoom * 2
 
         launch_opts: dict = {"headless": True}
         if args.proxy:
@@ -120,9 +122,8 @@ def main() -> None:
                 # Handle terminal resize (font size change → different cols/rows)
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
-                    # Scale browser viewport proportionally to new terminal size
-                    vp_w = term.cols * 4  # ~4 CSS pixels per terminal column
-                    vp_h = term.rows * 8  # ~8 CSS pixels per terminal row
+                    vp_w = term.cols * zoom
+                    vp_h = term.rows * zoom * 2
                     page.set_viewport_size({"width": vp_w, "height": vp_h})
                     needs_refresh = True
 
