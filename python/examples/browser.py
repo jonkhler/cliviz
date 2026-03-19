@@ -117,6 +117,15 @@ def main() -> None:
             while True:
                 pacer.pace()
 
+                # Handle terminal resize (font size change → different cols/rows)
+                if term.was_resized():
+                    pb = cliviz.PixelBuffer(term.cols, term.rows)
+                    # Scale browser viewport proportionally to new terminal size
+                    vp_w = term.cols * 4  # ~4 CSS pixels per terminal column
+                    vp_h = term.rows * 8  # ~8 CSS pixels per terminal row
+                    page.set_viewport_size({"width": vp_w, "height": vp_h})
+                    needs_refresh = True
+
                 for event in read_input(sys.stdin.fileno()):
                     if event[0] == "key":
                         ch = event[1]
