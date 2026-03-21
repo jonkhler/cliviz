@@ -175,7 +175,7 @@ def take_screenshot(page: Page, pb: cliviz.PixelBuffer) -> np.ndarray | None:
     try:
         vp = page.viewport_size
         jpg = page.screenshot(
-            type="jpeg", quality=60,
+            type="jpeg", quality=85,
             clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
         )
         arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
@@ -345,13 +345,16 @@ def main() -> None:
                 if frame is not None:
                     render_frame(pb, frame, zoom)
 
+                # encode → text overlay → nodiff present
+                # present_nodiff avoids stale cells from JPEG producing same
+                # quantized color as the previous frame (causes torn-frame artifacts)
                 pb.encode_all()
                 mode_hint = "  [Ctrl-Z]zoom-select " if zoom.mode == ZoomMode.SELECTING else \
                             "  [Ctrl-Z]exit-zoom " if zoom.mode == ZoomMode.ACTIVE else ""
                 pb.draw_text(1, 0,
                              f" {pacer.fps:.0f}fps  {page.url[:50]}  {mode_hint}Ctrl-Q=quit ",
                              255, 255, 255, 30, 30, 50)
-                pb.present()
+                pb.present_nodiff()
 
         finally:
             cdp.detach()
