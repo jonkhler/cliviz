@@ -354,6 +354,14 @@ def main() -> None:
                 pb.draw_text(1, 0,
                              f" {pacer.fps:.0f}fps  {page.url[:50]}  {mode_hint}Ctrl-Q=quit ",
                              255, 255, 255, 30, 30, 50)
+                # Terminal title: resolution info for debugging
+                vp = page.viewport_size
+                sys.stdout.buffer.write(
+                    f"\x1b]0;cliviz {pb.width}×{pb.height}px "
+                    f"| browser {vp['width']}×{vp['height']}css "
+                    f"| {pacer.fps:.0f}fps\x07".encode()
+                )
+                sys.stdout.buffer.flush()
                 pb.present_nodiff()
 
         finally:
