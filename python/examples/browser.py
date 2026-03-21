@@ -244,6 +244,15 @@ def main() -> None:
         cdp = ctx.new_cdp_session(page)
         set_screen_metrics(cdp, layout_w, lh)
 
+        def on_navigation(_frame) -> None:
+            """Exit zoom on any navigation — new page has different layout."""
+            nonlocal zoom
+            if zoom.mode == ZoomMode.ACTIVE:
+                page.set_viewport_size({"width": layout_w, "height": lh})
+                zoom = Zoom()
+
+        page.on("framenavigated", on_navigation)
+
         page.goto(args.url, wait_until="domcontentloaded")
         enable_mouse()
 
