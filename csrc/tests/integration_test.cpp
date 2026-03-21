@@ -107,14 +107,14 @@ TEST(Integration, AllCursorPositionsAreOneBased) {
 
 TEST(Integration, AppendNearCapacityDoesNotOverflow) {
     OutputBuffer buf;
-    constexpr uint32_t FILL = OutputBuffer::CAPACITY - 5;
+    const uint32_t FILL = buf.capacity - 5;
     for (uint32_t i = 0; i < FILL; ++i) {
         buf.append_byte('A');
     }
     EXPECT_EQ(buf.size(), FILL);
 
     buf.append("HELLO", 5);
-    EXPECT_EQ(buf.size(), OutputBuffer::CAPACITY);
+    EXPECT_EQ(buf.size(), buf.capacity);
 
     buf.append("X", 1);
     EXPECT_EQ(buf.size(), 1u);

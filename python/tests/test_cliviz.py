@@ -69,6 +69,14 @@ def test_draw_text_with_bg():
     pb.draw_text(0, 0, "AB", 255, 0, 0, 0, 0, 128)
 
 
+def test_present_threshold_accepts_parameter():
+    pb = cliviz.PixelBuffer(10, 5)
+    pb.clear(100, 100, 100)
+    pb.encode_all()
+    # Should not crash — threshold is forwarded to C++ diff engine
+    pb.present(color_threshold=8)
+
+
 def test_terminal_accepts_color_mode():
     t = cliviz.Terminal(color_mode="256")
     # Should not crash — color mode stored for init

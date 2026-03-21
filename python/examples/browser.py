@@ -362,7 +362,7 @@ def main() -> None:
                     f"| {pacer.fps:.0f}fps\x07".encode()
                 )
                 sys.stdout.buffer.flush()
-                pb.present_nodiff()
+                pb.present(color_threshold=8)
 
         finally:
             cdp.detach()

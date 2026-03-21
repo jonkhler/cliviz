@@ -11,7 +11,8 @@ namespace nb = nanobind;
 using namespace nb::literals;
 using namespace cliviz;
 
-static OutputBuffer g_outbuf;
+// Color mode set by Terminal, applied to each new PyPixelBuffer
+static ColorMode g_color_mode = ColorMode::TrueColor;
 
 // ── Terminal wrapper ──
 
@@ -21,20 +22,22 @@ struct Terminal {
     bool active = false;
     std::string color_mode_override;
 
+    ColorMode resolved_color_mode = ColorMode::TrueColor;
+
     bool init(const std::string& color_mode_str = "") {
         if (!term_init()) return false;
         active = true;
         auto ts = term_get_size();
         cols = ts.cols;
         rows = ts.rows;
-        // Set color mode: explicit override or auto-detect
         if (color_mode_str == "truecolor" || color_mode_str == "24bit") {
-            g_outbuf.color_mode = ColorMode::TrueColor;
+            resolved_color_mode = ColorMode::TrueColor;
         } else if (color_mode_str == "256") {
-            g_outbuf.color_mode = ColorMode::Color256;
+            resolved_color_mode = ColorMode::Color256;
         } else {
-            g_outbuf.color_mode = detect_color_mode();
+            resolved_color_mode = detect_color_mode();
         }
+        g_color_mode = resolved_color_mode;
         return true;
     }
 
@@ -60,10 +63,13 @@ struct Terminal {
 
 struct PyPixelBuffer {
     std::unique_ptr<PixelBuffer> inner;
+    OutputBuffer outbuf; // sized for this pixel buffer — no mid-frame auto-flushes
 
     PyPixelBuffer(uint32_t term_cols, uint32_t term_rows)
-        : inner(PixelBuffer::create(term_cols, term_rows)) {
+        : inner(PixelBuffer::create(term_cols, term_rows)),
+          outbuf(OutputBuffer::capacity_for_cells(term_cols * term_rows)) {
         if (!inner) throw std::runtime_error("Failed to create PixelBuffer");
+        outbuf.color_mode = g_color_mode;
     }
 
     uint32_t width() const { return inner->width; }
@@ -90,26 +96,26 @@ struct PyPixelBuffer {
 
     uint32_t flush() {
         inner->encode();
-        g_outbuf.clear();
-        uint32_t n = inner->fb->flush(g_outbuf);
-        g_outbuf.flush();
+        outbuf.clear();
+        uint32_t n = inner->fb->flush(outbuf);
+        outbuf.flush();
         return n;
     }
 
     void encode() { inner->encode(); }
     void encode_all() { inner->encode_all(); }
 
-    uint32_t present() {
-        g_outbuf.clear();
-        uint32_t n = inner->fb->flush(g_outbuf);
-        g_outbuf.flush();
+    uint32_t present(uint8_t color_threshold = 0) {
+        outbuf.clear();
+        uint32_t n = inner->fb->flush(outbuf, color_threshold);
+        outbuf.flush();
         return n;
     }
 
     uint32_t present_nodiff() {
-        g_outbuf.clear();
-        uint32_t n = inner->fb->flush_nodiff(g_outbuf);
-        g_outbuf.flush();
+        outbuf.clear();
+        uint32_t n = inner->fb->flush_nodiff(outbuf);
+        outbuf.flush();
         return n;
     }
 
@@ -156,7 +162,10 @@ NB_MODULE(_native, mod) {
              "x0"_a, "y0"_a, "x1"_a, "y1"_a, "r"_a, "g"_a, "b"_a)
         .def("encode", &PyPixelBuffer::encode, "Encode dirty pixel pairs into cells")
         .def("encode_all", &PyPixelBuffer::encode_all, "Encode all pixel pairs into cells")
-        .def("present", &PyPixelBuffer::present, "Diff + write to terminal (call after encode + draw_text)")
+        .def("present", [](PyPixelBuffer& self, uint8_t color_threshold) {
+             return self.present(color_threshold);
+         }, "Diff + write to terminal. color_threshold: skip cells where all channels changed by < N (absorbs JPEG noise)",
+         "color_threshold"_a = 0)
         .def("present_nodiff", &PyPixelBuffer::present_nodiff, "Write all cells to terminal (no diff, for full redraws)")
         .def("flush", &PyPixelBuffer::flush, "Encode dirty cells and write to terminal")
         .def("flush_full", &PyPixelBuffer::flush_full, "Encode all cells and write to terminal")

@@ -158,6 +158,40 @@ TEST(OutputBuffer, FullCellEmission) {
     EXPECT_EQ(buf.view(), expected);
 }
 
+// ── Dynamic capacity ──
+
+TEST(OutputBuffer, DynamicCapacity) {
+    OutputBuffer buf(512);
+    EXPECT_EQ(buf.capacity, 512u);
+    EXPECT_EQ(buf.size(), 0u);
+}
+
+TEST(OutputBuffer, CapacityForCells) {
+    uint32_t cap = OutputBuffer::capacity_for_cells(100);
+    // 100 cells × 53 bytes + 16 sync bytes
+    EXPECT_EQ(cap, 100u * 53u + 16u);
+}
+
+TEST(OutputBuffer, CapacityForCellsLargeTerminal) {
+    // 518 cols × 160 rows = 82,880 cells — fits without overflow
+    uint32_t cells = 518u * 160u;
+    uint32_t cap = OutputBuffer::capacity_for_cells(cells);
+    EXPECT_EQ(cap, cells * 53u + 16u);
+    EXPECT_GT(cap, 4u * 1024u * 1024u); // > 4MB
+}
+
+TEST(OutputBuffer, AutoFlushAtDynamicCapacity) {
+    // Small buffer — auto-flush triggers at the right boundary
+    OutputBuffer buf(64);
+    for (uint32_t i = 0; i < 64; ++i) {
+        buf.append_byte('A');
+    }
+    EXPECT_EQ(buf.size(), 64u);
+    // One more byte triggers auto-flush (write to stdout) + appends
+    buf.append_byte('X');
+    EXPECT_EQ(buf.size(), 1u);
+}
+
 // ── Capacity ──
 
 TEST(OutputBuffer, LargeAppendFitsInBuffer) {
