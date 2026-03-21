@@ -2,13 +2,16 @@
 
 Install: uv pip install ".[browser]" && playwright install chromium
 Run:     uv run python python/examples/browser.py [url] [--proxy socks5://localhost:1080]
-Keys:    mouse click, scroll, type text. Ctrl-Q=quit
+Keys:    mouse click/scroll, type text. Ctrl-Q quit.
+Zoom:    Ctrl-Z enter zoom-select mode, drag to select rect, Ctrl-Z again to exit.
 """
 
 import io
 import os
 import select
 import sys
+from dataclasses import dataclass
+from enum import Enum, auto
 
 import numpy as np
 from PIL import Image
@@ -20,18 +23,24 @@ import cliviz
 # ── Terminal mouse tracking ──
 
 def enable_mouse() -> None:
-    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1006h")
+    # Enable click + motion tracking (SGR mode)
+    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1003h\x1b[?1006h")
     sys.stdout.buffer.flush()
 
 def disable_mouse() -> None:
-    sys.stdout.buffer.write(b"\x1b[?1000l\x1b[?1006l")
+    sys.stdout.buffer.write(b"\x1b[?1000l\x1b[?1003l\x1b[?1006l")
     sys.stdout.buffer.flush()
 
 
 # ── Input parsing ──
 
 def read_input(fd: int) -> list:
-    """Return list of ('key', ch), ('mouse', btn, cx, cy, pressed), ('scroll', dir, cx, cy)."""
+    """Return list of events:
+      ('key', ch)
+      ('mouse', btn, cx, cy, pressed)
+      ('motion', cx, cy)
+      ('scroll', dir, cx, cy)
+    """
     events: list = []
     buf = b""
     while select.select([fd], [], [], 0)[0]:
@@ -56,39 +65,64 @@ def read_input(fd: int) -> list:
             if len(parts) == 3:
                 cb, cx, cy = int(parts[0]), int(parts[1]), int(parts[2])
                 button = cb & 0x03
+                is_motion = bool(cb & 32)
                 if cb & 64:
                     events.append(("scroll", "up" if button == 0 else "down", cx, cy))
-                elif not (cb & 32):
+                elif is_motion:
+                    events.append(("motion", cx, cy))
+                else:
                     events.append(("mouse", button, cx, cy, not is_release))
             i = end + 1
         elif b == 0x1B:
-            i += 1
-            while i < len(buf) and buf[i] not in range(0x40, 0x7F):
+            # Check for bare ESC (Ctrl-Esc) — no sequence follows quickly
+            if i + 1 < len(buf) and buf[i+1] not in (ord("["), ord("O")):
+                events.append(("key", "\x1b"))
                 i += 1
-            i += 1
+            else:
+                i += 1
+                while i < len(buf) and buf[i] not in range(0x40, 0x7F):
+                    i += 1
+                i += 1
         else:
             events.append(("key", chr(b)))
             i += 1
     return events
 
 
+# ── Zoom state ──
+
+class ZoomMode(Enum):
+    NONE      = auto()  # normal browsing
+    SELECTING = auto()  # Ctrl-Z pressed, drag to define rect
+    ACTIVE    = auto()  # rect selected, display is cropped+upscaled
+
+
+@dataclass
+class Zoom:
+    mode: ZoomMode = ZoomMode.NONE
+    drag_start: tuple[int, int] | None = None  # pixel coords (pb space)
+    drag_cur:   tuple[int, int] | None = None  # pixel coords (pb space)
+    rect: tuple[int, int, int, int] | None = None  # (x0,y0,x1,y1) pb pixel space
+
+
+def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
+    """Terminal cell (1-based) → pixel buffer coords."""
+    return cx - 1, (cy - 1) * 2
+
+
 # ── Browser setup ──
 
 def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> BrowserContext:
-    """Create browser context with fullscreen blocking and video constraints."""
     opts: dict = {"viewport": {"width": layout_w, "height": layout_h}}
     if proxy:
         opts["proxy"] = {"server": proxy}
     ctx = browser.new_context(**opts)
     ctx.add_init_script("""
-        // Block fullscreen API
         Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
-        Object.defineProperty(document, 'fullscreen', {get: () => false});
+        Object.defineProperty(document, 'fullscreen',        {get: () => false});
         document.documentElement.requestFullscreen = () => Promise.resolve();
-        Element.prototype.requestFullscreen = () => Promise.resolve();
-        document.exitFullscreen = () => Promise.resolve();
-
-        // Open all links in same tab
+        Element.prototype.requestFullscreen         = () => Promise.resolve();
+        document.exitFullscreen                     = () => Promise.resolve();
         document.addEventListener('click', e => {
             const a = e.target.closest('a');
             if (a) a.removeAttribute('target');
@@ -98,7 +132,6 @@ def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> Br
 
 
 def set_screen_metrics(cdp: CDPSession, w: int, h: int) -> None:
-    """Tell Chromium the screen is exactly our layout size (prevents fullscreen overflow)."""
     cdp.send("Emulation.setDeviceMetricsOverride", {
         "width": w, "height": h,
         "screenWidth": w, "screenHeight": h,
@@ -112,16 +145,26 @@ def terminal_to_css(
     cx: int, cy: int, pb: cliviz.PixelBuffer,
     layout_w: int, layout_h: int,
 ) -> tuple[float, float]:
-    """Map terminal cell (1-based) to browser CSS pixel coordinates."""
     return (cx - 1) / pb.width * layout_w, (cy - 1) * 2 / pb.height * layout_h
 
 
+def zoomed_to_css(
+    cx: int, cy: int, pb: cliviz.PixelBuffer,
+    rect: tuple[int, int, int, int],
+    layout_w: int, layout_h: int,
+) -> tuple[float, float]:
+    """Map terminal cell through zoom rect to CSS coords."""
+    x0, y0, x1, y1 = rect
+    px = (cx - 1) / pb.width  * (x1 - x0) + x0   # pixel in original frame
+    py = (cy - 1) * 2 / pb.height * (y1 - y0) + y0
+    return px / pb.width * layout_w, py / pb.height * layout_h
+
+
 def layout_height(layout_w: int, pb: cliviz.PixelBuffer) -> int:
-    """Browser layout height matching terminal aspect ratio."""
     return max(100, int(layout_w * pb.height / pb.width))
 
 
-# ── Screenshot ──
+# ── Screenshot + zoom rendering ──
 
 _CONSTRAIN_VIDEOS_JS = """
     document.querySelectorAll('video').forEach(v => {
@@ -134,8 +177,8 @@ _CONSTRAIN_VIDEOS_JS = """
 """
 
 
-def capture(page: Page, pb: cliviz.PixelBuffer) -> None:
-    """Constrain videos then take a clipped screenshot into the pixel buffer."""
+def take_screenshot(page: Page, pb: cliviz.PixelBuffer) -> np.ndarray | None:
+    """Constrain videos + screenshot → numpy array in pb dimensions."""
     try:
         page.evaluate(_CONSTRAIN_VIDEOS_JS)
     except Exception:
@@ -147,14 +190,44 @@ def capture(page: Page, pb: cliviz.PixelBuffer) -> None:
             clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
         )
         arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
-        pb.pixels[:] = 0
-        if arr.shape[:2] == (pb.height, pb.width):
-            pb.pixels[:] = arr
-        else:
-            img = Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR)
-            pb.pixels[:] = np.array(img, dtype=np.uint8)
+        if arr.shape[:2] != (pb.height, pb.width):
+            arr = np.array(
+                Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR),
+                dtype=np.uint8,
+            )
+        return arr
     except Exception:
-        pass
+        return None
+
+
+def render_frame(pb: cliviz.PixelBuffer, frame: np.ndarray, zoom: Zoom) -> None:
+    """Write frame into pb.pixels, applying zoom crop or selection overlay."""
+    if zoom.mode == ZoomMode.ACTIVE and zoom.rect is not None:
+        x0, y0, x1, y1 = zoom.rect
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(pb.width, x1), min(pb.height, y1)
+        if x1 > x0 + 2 and y1 > y0 + 2:
+            crop = frame[y0:y1, x0:x1]
+            zoomed = np.array(
+                Image.fromarray(crop).resize((pb.width, pb.height), Image.NEAREST),
+                dtype=np.uint8,
+            )
+            pb.pixels[:] = zoomed
+            return
+
+    pb.pixels[:] = frame
+
+    if zoom.mode == ZoomMode.SELECTING and zoom.drag_start and zoom.drag_cur:
+        sx, sy = zoom.drag_start
+        ex, ey = zoom.drag_cur
+        x0, x1 = max(0, min(sx, ex)), min(pb.width,  max(sx, ex))
+        y0, y1 = max(0, min(sy, ey)), min(pb.height, max(sy, ey))
+        if x1 > x0 and y1 > y0:
+            region = pb.pixels[y0:y1, x0:x1].astype(np.float32)
+            pb.pixels[y0:y1, x0:x1] = np.clip(
+                region * 0.5 + np.array([0, 80, 200], dtype=np.float32) * 0.5,
+                0, 255,
+            ).astype(np.uint8)
 
 
 # ── Main ──
@@ -172,6 +245,7 @@ def main() -> None:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=30)
         layout_w = args.width
+        zoom = Zoom()
 
         browser = pw.chromium.launch(
             headless=True,
@@ -181,7 +255,6 @@ def main() -> None:
         lh = layout_height(layout_w, pb)
         ctx = make_context(browser, layout_w, lh, args.proxy)
         page = ctx.new_page()
-
         cdp = ctx.new_cdp_session(page)
         set_screen_metrics(cdp, layout_w, lh)
 
@@ -197,34 +270,79 @@ def main() -> None:
                     lh = layout_height(layout_w, pb)
                     page.set_viewport_size({"width": layout_w, "height": lh})
                     set_screen_metrics(cdp, layout_w, lh)
+                    zoom = Zoom()  # reset zoom on resize
 
                 for event in read_input(sys.stdin.fileno()):
-                    if event[0] == "key":
+                    etype = event[0]
+
+                    if etype == "key":
                         ch = event[1]
-                        if ch == "\x11":
+                        if ch == "\x11":  # Ctrl-Q
                             return
-                        elif ch == "\r":
-                            page.keyboard.press("Enter")
-                        elif ch == "\x7f":
-                            page.keyboard.press("Backspace")
-                        elif ch == "\t":
-                            page.keyboard.press("Tab")
-                        else:
-                            page.keyboard.type(ch)
-                    elif event[0] == "mouse":
+                        elif ch == "\x1a":  # Ctrl-Z → toggle zoom select
+                            if zoom.mode == ZoomMode.NONE:
+                                zoom = Zoom(mode=ZoomMode.SELECTING)
+                            else:
+                                zoom = Zoom()  # exit zoom
+                        elif ch == "\x1b":  # ESC → exit zoom
+                            zoom = Zoom()
+                        elif zoom.mode == ZoomMode.NONE:
+                            if ch == "\r":
+                                page.keyboard.press("Enter")
+                            elif ch == "\x7f":
+                                page.keyboard.press("Backspace")
+                            elif ch == "\t":
+                                page.keyboard.press("Tab")
+                            else:
+                                page.keyboard.type(ch)
+
+                    elif etype == "motion":
+                        _, cx, cy = event
+                        if zoom.mode == ZoomMode.SELECTING and zoom.drag_start:
+                            zoom.drag_cur = cell_to_pixel(cx, cy)
+
+                    elif etype == "mouse":
                         _, btn, cx, cy, pressed = event
-                        if pressed and btn == 0:
-                            bx, by = terminal_to_css(cx, cy, pb, layout_w,
-                                                     page.viewport_size["height"])
-                            page.mouse.click(bx, by)
-                    elif event[0] == "scroll":
+                        px, py = cell_to_pixel(cx, cy)
+
+                        if zoom.mode == ZoomMode.SELECTING:
+                            if pressed and btn == 0:
+                                zoom.drag_start = (px, py)
+                                zoom.drag_cur   = (px, py)
+                            elif not pressed and btn == 0 and zoom.drag_start:
+                                x0 = min(zoom.drag_start[0], px)
+                                y0 = min(zoom.drag_start[1], py)
+                                x1 = max(zoom.drag_start[0], px)
+                                y1 = max(zoom.drag_start[1], py)
+                                if x1 - x0 > 4 and y1 - y0 > 4:
+                                    zoom = Zoom(mode=ZoomMode.ACTIVE, rect=(x0, y0, x1, y1))
+                                else:
+                                    zoom = Zoom()  # rect too small, cancel
+
+                        elif zoom.mode == ZoomMode.ACTIVE:
+                            if pressed and btn == 0:
+                                assert zoom.rect is not None
+                                bx, by = zoomed_to_css(cx, cy, pb, zoom.rect, layout_w, lh)
+                                page.mouse.click(bx, by)
+
+                        else:  # NONE
+                            if pressed and btn == 0:
+                                bx, by = terminal_to_css(cx, cy, pb, layout_w, lh)
+                                page.mouse.click(bx, by)
+
+                    elif etype == "scroll":
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
-                capture(page, pb)
+                frame = take_screenshot(page, pb)
+                if frame is not None:
+                    render_frame(pb, frame, zoom)
+
                 pb.encode_all()
+                mode_hint = "  [Ctrl-Z]zoom-select " if zoom.mode == ZoomMode.SELECTING else \
+                            "  [Ctrl-Z]exit-zoom " if zoom.mode == ZoomMode.ACTIVE else ""
                 pb.draw_text(1, 0,
-                             f" {pacer.fps:.0f}fps  {page.url[:60]}  Ctrl-Q=quit ",
+                             f" {pacer.fps:.0f}fps  {page.url[:50]}  {mode_hint}Ctrl-Q=quit ",
                              255, 255, 255, 30, 30, 50)
                 pb.present()
 
