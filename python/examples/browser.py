@@ -244,14 +244,9 @@ def main() -> None:
         cdp = ctx.new_cdp_session(page)
         set_screen_metrics(cdp, layout_w, lh)
 
-        def on_navigation(_frame) -> None:
-            """Exit zoom on any navigation — new page has different layout."""
-            nonlocal zoom
-            if zoom.mode == ZoomMode.ACTIVE:
-                page.set_viewport_size({"width": layout_w, "height": lh})
-                zoom = Zoom()
-
-        page.on("framenavigated", on_navigation)
+        # Use a flag — never call Playwright API inside event callbacks
+        navigation_pending = [False]
+        page.on("framenavigated", lambda _: navigation_pending.__setitem__(0, True))
 
         page.goto(args.url, wait_until="domcontentloaded")
         enable_mouse()
@@ -260,12 +255,28 @@ def main() -> None:
             while True:
                 pacer.pace()
 
+                # Exit zoom on navigation (deferred from callback)
+                if navigation_pending[0]:
+                    navigation_pending[0] = False
+                    if zoom.mode == ZoomMode.ACTIVE:
+                        page.set_viewport_size({"width": layout_w, "height": lh})
+                        zoom = Zoom()
+
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
                     lh = layout_height(layout_w, pb)
                     page.set_viewport_size({"width": layout_w, "height": lh})
                     set_screen_metrics(cdp, layout_w, lh)
-                    zoom = Zoom()  # reset zoom on resize
+                    zoom = Zoom()
+
+                # Re-pin scroll position each frame while zoomed so scroll events
+                # can't drift the view away from the selected region
+                if zoom.mode == ZoomMode.ACTIVE and zoom.css_rect:
+                    cx0, cy0 = zoom.css_rect[0], zoom.css_rect[1]
+                    try:
+                        page.evaluate(f"window.scrollTo({cx0}, {cy0})")
+                    except Exception:
+                        pass
 
                 for event in read_input(sys.stdin.fileno()):
                     etype = event[0]
@@ -348,7 +359,7 @@ def main() -> None:
                                 bx, by = terminal_to_css(cx, cy, pb, layout_w, lh)
                                 page.mouse.click(bx, by)
 
-                    elif etype == "scroll":
+                    elif etype == "scroll" and zoom.mode == ZoomMode.NONE:
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
