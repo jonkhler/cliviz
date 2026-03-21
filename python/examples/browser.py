@@ -100,9 +100,11 @@ class ZoomMode(Enum):
 @dataclass
 class Zoom:
     mode: ZoomMode = ZoomMode.NONE
-    drag_start: tuple[int, int] | None = None  # pixel coords (pb space)
-    drag_cur:   tuple[int, int] | None = None  # pixel coords (pb space)
-    rect: tuple[int, int, int, int] | None = None  # (x0,y0,x1,y1) pb pixel space
+    drag_start: tuple[int, int] | None = None  # pb pixel coords
+    drag_cur:   tuple[int, int] | None = None  # pb pixel coords
+    rect: tuple[int, int, int, int] | None = None           # (x0,y0,x1,y1) pb pixels
+    css_rect: tuple[float, float, float, float] | None = None  # (x0,y0,x1,y1) CSS pixels
+    saved_scroll: tuple[float, float] = (0.0, 0.0)
 
 
 def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
@@ -148,16 +150,13 @@ def terminal_to_css(
     return (cx - 1) / pb.width * layout_w, (cy - 1) * 2 / pb.height * layout_h
 
 
-def zoomed_to_css(
+def zoomed_viewport_click(
     cx: int, cy: int, pb: cliviz.PixelBuffer,
-    rect: tuple[int, int, int, int],
-    layout_w: int, layout_h: int,
+    css_rect: tuple[float, float, float, float],
 ) -> tuple[float, float]:
-    """Map terminal cell through zoom rect to CSS coords."""
-    x0, y0, x1, y1 = rect
-    px = (cx - 1) / pb.width  * (x1 - x0) + x0   # pixel in original frame
-    py = (cy - 1) * 2 / pb.height * (y1 - y0) + y0
-    return px / pb.width * layout_w, py / pb.height * layout_h
+    """Map terminal cell to viewport coords within the zoomed CSS region."""
+    cx0, cy0, cx1, cy1 = css_rect
+    return (cx - 1) / pb.width * (cx1 - cx0), (cy - 1) * 2 / pb.height * (cy1 - cy0)
 
 
 def layout_height(layout_w: int, pb: cliviz.PixelBuffer) -> int:
@@ -201,21 +200,8 @@ def take_screenshot(page: Page, pb: cliviz.PixelBuffer) -> np.ndarray | None:
 
 
 def render_frame(pb: cliviz.PixelBuffer, frame: np.ndarray, zoom: Zoom) -> None:
-    """Write frame into pb.pixels, applying zoom crop or selection overlay."""
-    if zoom.mode == ZoomMode.ACTIVE and zoom.rect is not None:
-        x0, y0, x1, y1 = zoom.rect
-        x0, y0 = max(0, x0), max(0, y0)
-        x1, y1 = min(pb.width, x1), min(pb.height, y1)
-        if x1 > x0 + 2 and y1 > y0 + 2:
-            crop = frame[y0:y1, x0:x1]
-            zoomed = np.array(
-                Image.fromarray(crop).resize((pb.width, pb.height), Image.NEAREST),
-                dtype=np.uint8,
-            )
-            pb.pixels[:] = zoomed
-            return
-
-    pb.pixels[:] = frame
+    """Write frame into pb.pixels, applying selection overlay if selecting."""
+    pb.pixels[:] = frame  # zoomed mode: frame already shows the right region
 
     if zoom.mode == ZoomMode.SELECTING and zoom.drag_start and zoom.drag_cur:
         sx, sy = zoom.drag_start
@@ -275,17 +261,25 @@ def main() -> None:
                 for event in read_input(sys.stdin.fileno()):
                     etype = event[0]
 
+                    def exit_zoom() -> None:
+                        nonlocal zoom
+                        if zoom.mode == ZoomMode.ACTIVE:
+                            page.set_viewport_size({"width": layout_w, "height": lh})
+                            sx, sy = zoom.saved_scroll
+                            page.evaluate(f"window.scrollTo({sx}, {sy})")
+                        zoom = Zoom()
+
                     if etype == "key":
                         ch = event[1]
                         if ch == "\x11":  # Ctrl-Q
                             return
-                        elif ch == "\x1a":  # Ctrl-Z → toggle zoom select
+                        elif ch == "\x1a":  # Ctrl-Z → toggle zoom select / exit
                             if zoom.mode == ZoomMode.NONE:
                                 zoom = Zoom(mode=ZoomMode.SELECTING)
                             else:
-                                zoom = Zoom()  # exit zoom
+                                exit_zoom()
                         elif ch == "\x1b":  # ESC → exit zoom
-                            zoom = Zoom()
+                            exit_zoom()
                         elif zoom.mode == ZoomMode.NONE:
                             if ch == "\r":
                                 page.keyboard.press("Enter")
@@ -315,14 +309,29 @@ def main() -> None:
                                 x1 = max(zoom.drag_start[0], px)
                                 y1 = max(zoom.drag_start[1], py)
                                 if x1 - x0 > 4 and y1 - y0 > 4:
-                                    zoom = Zoom(mode=ZoomMode.ACTIVE, rect=(x0, y0, x1, y1))
+                                    # Convert rect to CSS and set the zoom viewport
+                                    cx0 = x0 / pb.width  * layout_w
+                                    cy0 = y0 / pb.height * lh
+                                    cx1 = x1 / pb.width  * layout_w
+                                    cy1 = y1 / pb.height * lh
+                                    scroll = page.evaluate("() => [window.scrollX, window.scrollY]")
+                                    zoom = Zoom(
+                                        mode=ZoomMode.ACTIVE,
+                                        rect=(x0, y0, x1, y1),
+                                        css_rect=(cx0, cy0, cx1, cy1),
+                                        saved_scroll=(scroll[0], scroll[1]),
+                                    )
+                                    page.set_viewport_size({
+                                        "width":  max(10, int(cx1 - cx0)),
+                                        "height": max(10, int(cy1 - cy0)),
+                                    })
+                                    page.evaluate(f"window.scrollTo({cx0}, {cy0})")
                                 else:
-                                    zoom = Zoom()  # rect too small, cancel
+                                    zoom = Zoom()
 
                         elif zoom.mode == ZoomMode.ACTIVE:
-                            if pressed and btn == 0:
-                                assert zoom.rect is not None
-                                bx, by = zoomed_to_css(cx, cy, pb, zoom.rect, layout_w, lh)
+                            if pressed and btn == 0 and zoom.css_rect:
+                                bx, by = zoomed_viewport_click(cx, cy, pb, zoom.css_rect)
                                 page.mouse.click(bx, by)
 
                         else:  # NONE
