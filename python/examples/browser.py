@@ -114,9 +114,6 @@ def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
 # ── Browser setup ──
 
 _INIT_SCRIPT = """
-    // Prevent bot detection
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-
     // Block fullscreen API (prevents video/page from expanding beyond viewport)
     Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
     Object.defineProperty(document, 'fullscreen',        {get: () => false});
@@ -131,7 +128,7 @@ _INIT_SCRIPT = """
     });
 """
 
-_CHROMIUM_ARGS = ["--disable-features=FullscreenWithinTab", "--kiosk"]
+_CHROMIUM_ARGS = ["--disable-features=FullscreenWithinTab"]
 
 
 def setup_browser(
