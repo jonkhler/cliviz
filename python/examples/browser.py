@@ -166,8 +166,8 @@ _CONSTRAIN_VIDEOS_JS = """
 """
 
 
-def take_screenshot(page: Page, pb: cliviz.PixelBuffer) -> np.ndarray | None:
-    """Constrain videos + screenshot → numpy array in pb dimensions."""
+def take_screenshot(page: Page) -> np.ndarray | None:
+    """Constrain videos + screenshot → numpy array at native browser resolution."""
     try:
         page.evaluate(_CONSTRAIN_VIDEOS_JS)
     except Exception:
@@ -178,31 +178,44 @@ def take_screenshot(page: Page, pb: cliviz.PixelBuffer) -> np.ndarray | None:
             type="jpeg", quality=85,
             clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
         )
-        arr = np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
-        if arr.shape[:2] != (pb.height, pb.width):
-            arr = np.array(
-                Image.fromarray(arr).resize((pb.width, pb.height), Image.BILINEAR),
-                dtype=np.uint8,
-            )
-        return arr
+        return np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
     except Exception:
         return None
 
 
-def render_frame(pb: cliviz.PixelBuffer, frame: np.ndarray, zoom: Zoom) -> None:
-    """Write frame into pb.pixels, cropping to zoom rect if active."""
+def render_frame(pb: cliviz.PixelBuffer, native: np.ndarray, zoom: Zoom) -> None:
+    """Downscale native screenshot into pb.pixels, using zoom rect if active.
+
+    Zoom crops from the full-resolution native array for maximum quality —
+    the crop is at browser rendering resolution, not the downscaled pb resolution.
+    """
+    native_h, native_w = native.shape[:2]
+
     if zoom.mode == ZoomMode.ACTIVE and zoom.rect is not None:
+        # Map zoom rect from pb pixel space to native array space
         x0, y0, x1, y1 = zoom.rect
-        x0, y0 = max(0, x0), max(0, y0)
-        x1, y1 = min(pb.width, x1), min(pb.height, y1)
-        if x1 > x0 + 2 and y1 > y0 + 2:
-            crop = frame[y0:y1, x0:x1]
+        nx0 = int(x0 / pb.width  * native_w)
+        ny0 = int(y0 / pb.height * native_h)
+        nx1 = int(x1 / pb.width  * native_w)
+        ny1 = int(y1 / pb.height * native_h)
+        nx0, ny0 = max(0, nx0), max(0, ny0)
+        nx1, ny1 = min(native_w, nx1), min(native_h, ny1)
+        if nx1 > nx0 + 2 and ny1 > ny0 + 2:
+            crop = native[ny0:ny1, nx0:nx1]
             pb.pixels[:] = np.array(
                 Image.fromarray(crop).resize((pb.width, pb.height), Image.LANCZOS),
                 dtype=np.uint8,
             )
             return
-    pb.pixels[:] = frame
+
+    # Normal: downscale full frame to pb dimensions
+    if native.shape[:2] == (pb.height, pb.width):
+        pb.pixels[:] = native
+    else:
+        pb.pixels[:] = np.array(
+            Image.fromarray(native).resize((pb.width, pb.height), Image.BILINEAR),
+            dtype=np.uint8,
+        )
 
     if zoom.mode == ZoomMode.SELECTING and zoom.drag_start and zoom.drag_cur:
         sx, sy = zoom.drag_start
@@ -341,7 +354,7 @@ def main() -> None:
                         _, direction, _, _ = event
                         page.mouse.wheel(0, -60 if direction == "up" else 60)
 
-                frame = take_screenshot(page, pb)
+                frame = take_screenshot(page)
                 if frame is not None:
                     render_frame(pb, frame, zoom)
 
