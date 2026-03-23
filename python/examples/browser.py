@@ -294,6 +294,7 @@ def main() -> None:
         navigation_pending = [False]
         page.on("framenavigated", lambda _: navigation_pending.__setitem__(0, True))
 
+
         page.goto(args.url, wait_until="domcontentloaded")
         enable_mouse()
 
