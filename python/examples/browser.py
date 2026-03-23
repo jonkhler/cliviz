@@ -330,7 +330,8 @@ def main() -> None:
                                 exit_zoom()
                         elif ch == "\x1b":  # ESC → exit zoom
                             exit_zoom()
-                        elif zoom.mode == ZoomMode.NONE:
+                        elif zoom.mode != ZoomMode.SELECTING:
+                            # Forward keys in both NONE and ACTIVE zoom modes
                             if ch == "\r":
                                 page.keyboard.press("Enter")
                             elif ch == "\x7f":
