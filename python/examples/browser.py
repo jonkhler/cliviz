@@ -339,7 +339,7 @@ def main() -> None:
                             elif ch == "\t":
                                 page.keyboard.press("Tab")
                             else:
-                                page.keyboard.type(ch)
+                                page.keyboard.type(ch, delay=30)
 
                     elif etype == "motion":
                         _, cx, cy = event
