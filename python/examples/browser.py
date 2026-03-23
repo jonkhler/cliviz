@@ -265,6 +265,9 @@ def main() -> None:
     parser.add_argument("--profile", metavar="DIR",
                         help="Browser profile directory for persistent sessions "
                              "(cookies/logins survive between runs)")
+    parser.add_argument("--no-cdp", action="store_true",
+                        help="Disable CDP session (better login compatibility, "
+                             "disables fullscreen video fix)")
     args = parser.parse_args()
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
@@ -275,8 +278,9 @@ def main() -> None:
 
         lh = layout_height(layout_w, pb)
         ctx, page, cleanup = setup_browser(pw, layout_w, lh, args.proxy, args.profile)
-        cdp = ctx.new_cdp_session(page)
-        set_screen_metrics(cdp, layout_w, lh)
+        cdp = ctx.new_cdp_session(page) if not args.no_cdp else None
+        if cdp:
+            set_screen_metrics(cdp, layout_w, lh)
 
         # Use a flag — never call Playwright API inside event callbacks
         navigation_pending = [False]
@@ -298,7 +302,8 @@ def main() -> None:
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
                     lh = layout_height(layout_w, pb)
                     page.set_viewport_size({"width": layout_w, "height": lh})
-                    set_screen_metrics(cdp, layout_w, lh)
+                    if cdp:
+                        set_screen_metrics(cdp, layout_w, lh)
                     zoom = Zoom()
 
 
@@ -399,7 +404,8 @@ def main() -> None:
                 pb.present(color_threshold=8)
 
         finally:
-            cdp.detach()
+            if cdp:
+                cdp.detach()
             disable_mouse()
             cleanup()
 
