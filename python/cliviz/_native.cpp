@@ -76,6 +76,7 @@ struct PyPixelBuffer {
 
     uint32_t width() const { return inner->width; }
     uint32_t height() const { return inner->height; }
+    uint32_t term_rows() const { return inner->height / 2; }
 
     void set(uint32_t x, uint32_t y, uint8_t r, uint8_t g, uint8_t b) {
         inner->set(x, y, r, g, b);
@@ -153,6 +154,8 @@ NB_MODULE(_native, mod) {
         .def(nb::init<uint32_t, uint32_t>(), "term_cols"_a, "term_rows"_a)
         .def_prop_ro("width", &PyPixelBuffer::width)
         .def_prop_ro("height", &PyPixelBuffer::height)
+        .def_prop_ro("term_rows", &PyPixelBuffer::term_rows,
+                     "Terminal rows this buffer covers (height // 2)")
         .def_prop_ro("pixels",
                      [](nb::object self) {
                          auto& pb = nb::cast<PyPixelBuffer&>(self);

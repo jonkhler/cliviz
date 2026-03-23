@@ -82,6 +82,12 @@ def test_terminal_accepts_color_mode():
     # Should not crash — color mode stored for init
 
 
+def test_pixelbuffer_term_rows():
+    pb = cliviz.PixelBuffer(10, 5)
+    assert pb.term_rows == 5
+    assert pb.height == 10  # pixel rows = term_rows * 2
+
+
 def test_terminal_was_interrupted_false_by_default():
     t = cliviz.Terminal()
     assert not t.was_interrupted()
