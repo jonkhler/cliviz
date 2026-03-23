@@ -24,12 +24,20 @@ import cliviz
 # ── Terminal mouse tracking ──
 
 def enable_mouse() -> None:
-    # Enable click + motion tracking (SGR mode)
-    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1003h\x1b[?1006h")
+    # Click + scroll tracking only (SGR mode). Motion tracking enabled on demand.
+    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1006h")
     sys.stdout.buffer.flush()
 
 def disable_mouse() -> None:
     sys.stdout.buffer.write(b"\x1b[?1000l\x1b[?1003l\x1b[?1006l")
+    sys.stdout.buffer.flush()
+
+def enable_motion() -> None:
+    sys.stdout.buffer.write(b"\x1b[?1003h")
+    sys.stdout.buffer.flush()
+
+def disable_motion() -> None:
+    sys.stdout.buffer.write(b"\x1b[?1003l")
     sys.stdout.buffer.flush()
 
 
@@ -312,6 +320,7 @@ def main() -> None:
 
                     def exit_zoom() -> None:
                         nonlocal zoom
+                        disable_motion()  # stop motion events when not selecting
                         zoom = Zoom()
 
                     if etype == "key":
@@ -321,6 +330,7 @@ def main() -> None:
                         elif ch == "\x1a":  # Ctrl-Z → toggle zoom select / exit
                             if zoom.mode == ZoomMode.NONE:
                                 zoom = Zoom(mode=ZoomMode.SELECTING)
+                                enable_motion()   # track mouse movement for drag
                             else:
                                 exit_zoom()
                         elif ch == "\x1b":  # ESC → exit zoom
@@ -354,6 +364,7 @@ def main() -> None:
                                 y0 = min(zoom.drag_start[1], py)
                                 x1 = max(zoom.drag_start[0], px)
                                 y1 = max(zoom.drag_start[1], py)
+                                disable_motion()  # done dragging
                                 if x1 - x0 > 4 and y1 - y0 > 4:
                                     # Store rect in pb pixel space — no viewport change
                                     zoom = Zoom(
