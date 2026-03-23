@@ -31,3 +31,8 @@ TEST(Term, ShutdownSafeToCallWithoutInit) {
     term_shutdown();
     EXPECT_FALSE(term_is_active());
 }
+
+TEST(Term, WasInterrupted_FalseByDefault) {
+    // No signal has been sent; flag must start clear.
+    EXPECT_FALSE(term_was_interrupted());
+}

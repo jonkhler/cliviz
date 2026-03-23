@@ -31,6 +31,7 @@ PixelBuffer::~PixelBuffer() {
 }
 
 void PixelBuffer::set(uint32_t x, uint32_t y, uint8_t r, uint8_t g, uint8_t b) {
+    if (x >= width || y >= height) return;
     uint32_t idx = (y * width + x) * 3;
     pixels[idx + 0] = r;
     pixels[idx + 1] = g;
@@ -55,10 +56,15 @@ void PixelBuffer::mark_row_dirty(uint32_t y) {
 }
 
 void PixelBuffer::mark_rect_dirty(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1) {
+    x1 = x1 < width ? x1 : width;
+    y1 = y1 < height ? y1 : height;
+    if (x0 >= x1 || y0 >= y1) return;
+
     uint32_t cell_row0 = y0 >> 1;
-    uint32_t cell_row1 = (y1 > 0 ? y1 - 1 : 0) >> 1;
+    uint32_t cell_row1 = (y1 - 1) >> 1;
+    uint32_t cell_col1 = x1; // exclusive
     for (uint32_t r = cell_row0; r <= cell_row1; ++r) {
-        for (uint32_t c = x0; c < x1; ++c) {
+        for (uint32_t c = x0; c < cell_col1; ++c) {
             uint32_t cell_idx = r * fb->width + c;
             fb->dirty_mask[cell_idx >> 6] |= (1ULL << (cell_idx & 63));
         }

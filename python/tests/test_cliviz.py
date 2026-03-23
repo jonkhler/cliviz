@@ -82,6 +82,23 @@ def test_terminal_accepts_color_mode():
     # Should not crash — color mode stored for init
 
 
+def test_terminal_was_interrupted_false_by_default():
+    t = cliviz.Terminal()
+    assert not t.was_interrupted()
+
+
+def test_pixels_keeps_buffer_alive():
+    """numpy array returned by .pixels must keep the PixelBuffer alive."""
+    pb = cliviz.PixelBuffer(4, 2)
+    pb.clear(42, 0, 0)
+    pixels = pb.pixels
+    del pb  # PixelBuffer ref dropped; array must still hold it alive
+    import gc
+    gc.collect()
+    # Array contents must still be readable (no use-after-free)
+    assert pixels[0, 0, 0] == 42
+
+
 def test_terminal_fails_gracefully_in_test():
     t = cliviz.Terminal()
     if not os.isatty(1):

@@ -27,4 +27,11 @@ bool term_is_active();
 // Cleared after each call (edge-triggered).
 bool term_was_resized();
 
+// Returns true if SIGINT/SIGTERM was received since the last call.
+// Cleared after each call (edge-triggered).
+// The signal handler writes the cursor/screen restore sequence immediately
+// (async-signal-safe) and sets this flag; the caller is responsible for
+// calling term_shutdown() to restore termios and exiting.
+bool term_was_interrupted();
+
 } // namespace cliviz

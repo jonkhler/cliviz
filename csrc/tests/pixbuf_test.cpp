@@ -235,6 +235,22 @@ TEST(PixelBuffer, DrawTextFlushEmitsAscii) {
     EXPECT_EQ(output.find("\xe2\x96\x80"), std::string::npos);
 }
 
+// ── Bounds safety ──
+
+TEST(PixelBuffer, Set_OutOfBounds_DoesNotCrash) {
+    auto pb = PixelBuffer::create(4, 2); // width=4, height=4 pixels
+    // x == width and y == height are out-of-range; must not corrupt memory
+    pb->set(4, 0, 255, 0, 0); // x out of range
+    pb->set(0, 4, 0, 255, 0); // y out of range
+    pb->set(4, 4, 0, 0, 255); // both out of range
+}
+
+TEST(PixelBuffer, MarkRectDirty_OutOfBounds_DoesNotCrash) {
+    auto pb = PixelBuffer::create(4, 2);
+    // Rect extends past right/bottom edge; must not corrupt dirty mask
+    pb->mark_rect_dirty(3, 3, 10, 10);
+}
+
 // ── Full pipeline: set → encode → flush ──
 
 TEST(PixelBuffer, FullPipeline) {

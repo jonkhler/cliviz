@@ -14,6 +14,7 @@ namespace {
 
 bool g_active = false;
 volatile sig_atomic_t g_resized = 0;
+volatile sig_atomic_t g_interrupted = 0;
 struct termios g_orig_termios{};
 
 void winch_handler(int /*sig*/) { g_resized = 1; }
@@ -32,9 +33,20 @@ void restore_terminal() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_orig_termios);
 }
 
+// Signal handler: async-signal-safe.
+// Writes the visual restore sequence immediately so the screen returns to
+// normal on Ctrl-C even before the main loop processes the flag.
+// tcsetattr() is NOT async-signal-safe and is intentionally omitted here;
+// it runs when the main loop calls term_shutdown() or via the atexit handler.
 void signal_handler(int /*sig*/) {
-    restore_terminal();
-    _exit(1);
+    g_interrupted = 1;
+    if (g_active) {
+        const char restore_seq[] =
+            "\x1b[?25h"    // show cursor
+            "\x1b[?1049l"  // leave alternate screen
+            "\x1b[0m";     // reset attributes
+        ::write(STDOUT_FILENO, restore_seq, sizeof(restore_seq) - 1);
+    }
 }
 
 } // namespace
@@ -93,6 +105,14 @@ bool term_is_active() { return g_active; }
 bool term_was_resized() {
     if (g_resized) {
         g_resized = 0;
+        return true;
+    }
+    return false;
+}
+
+bool term_was_interrupted() {
+    if (g_interrupted) {
+        g_interrupted = 0;
         return true;
     }
     return false;

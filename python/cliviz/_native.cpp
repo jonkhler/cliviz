@@ -56,6 +56,8 @@ struct Terminal {
         return true;
     }
 
+    bool was_interrupted() const { return term_was_interrupted(); }
+
     ~Terminal() { shutdown(); }
 };
 
@@ -74,12 +76,6 @@ struct PyPixelBuffer {
 
     uint32_t width() const { return inner->width; }
     uint32_t height() const { return inner->height; }
-
-    nb::ndarray<nb::numpy, uint8_t> pixels() {
-        size_t shape[3] = {inner->height, inner->width, 3};
-        return nb::ndarray<nb::numpy, uint8_t>(
-            inner->pixels, 3, shape, nb::handle());
-    }
 
     void set(uint32_t x, uint32_t y, uint8_t r, uint8_t g, uint8_t b) {
         inner->set(x, y, r, g, b);
@@ -139,6 +135,9 @@ NB_MODULE(_native, mod) {
         .def("init", &Terminal::init, "color_mode"_a = "")
         .def("shutdown", &Terminal::shutdown)
         .def("was_resized", &Terminal::was_resized)
+        .def("was_interrupted", &Terminal::was_interrupted,
+             "True if SIGINT/SIGTERM was received; clears the flag on read. "
+             "Call term.shutdown() and exit when this returns True.")
         .def_ro("cols", &Terminal::cols)
         .def_ro("rows", &Terminal::rows)
         .def_ro("active", &Terminal::active)
@@ -154,7 +153,16 @@ NB_MODULE(_native, mod) {
         .def(nb::init<uint32_t, uint32_t>(), "term_cols"_a, "term_rows"_a)
         .def_prop_ro("width", &PyPixelBuffer::width)
         .def_prop_ro("height", &PyPixelBuffer::height)
-        .def_prop_ro("pixels", &PyPixelBuffer::pixels,
+        .def_prop_ro("pixels",
+                     [](nb::object self) {
+                         auto& pb = nb::cast<PyPixelBuffer&>(self);
+                         size_t shape[3] = {pb.inner->height, pb.inner->width, 3};
+                         // Attach `self` as owner: numpy holds a ref to this
+                         // PyPixelBuffer and prevents it from being GC'd while
+                         // the array is alive.
+                         return nb::ndarray<nb::numpy, uint8_t>(
+                             pb.inner->pixels, 3, shape, self);
+                     },
                      "Zero-copy numpy view (height, width, 3) into pixel data")
         .def("set", &PyPixelBuffer::set, "x"_a, "y"_a, "r"_a, "g"_a, "b"_a)
         .def("clear", &PyPixelBuffer::clear, "r"_a, "g"_a, "b"_a)
