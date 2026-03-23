@@ -114,13 +114,6 @@ def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
 # ── Browser setup ──
 
 _INIT_SCRIPT = """
-    // Block fullscreen API (prevents video/page from expanding beyond viewport)
-    Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
-    Object.defineProperty(document, 'fullscreen',        {get: () => false});
-    document.documentElement.requestFullscreen = () => Promise.resolve();
-    Element.prototype.requestFullscreen         = () => Promise.resolve();
-    document.exitFullscreen                     = () => Promise.resolve();
-
     // Open all links in current tab
     document.addEventListener('click', e => {
         const a = e.target.closest('a');
