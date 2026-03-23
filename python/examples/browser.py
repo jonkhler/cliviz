@@ -10,6 +10,7 @@ import io
 import os
 import select
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -112,23 +113,55 @@ def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
 
 # ── Browser setup ──
 
-def make_context(browser, layout_w: int, layout_h: int, proxy: str | None) -> BrowserContext:
-    opts: dict = {"viewport": {"width": layout_w, "height": layout_h}}
-    if proxy:
-        opts["proxy"] = {"server": proxy}
-    ctx = browser.new_context(**opts)
-    ctx.add_init_script("""
-        Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
-        Object.defineProperty(document, 'fullscreen',        {get: () => false});
-        document.documentElement.requestFullscreen = () => Promise.resolve();
-        Element.prototype.requestFullscreen         = () => Promise.resolve();
-        document.exitFullscreen                     = () => Promise.resolve();
-        document.addEventListener('click', e => {
-            const a = e.target.closest('a');
-            if (a) a.removeAttribute('target');
-        });
-    """)
-    return ctx
+_INIT_SCRIPT = """
+    // Prevent bot detection
+    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+    // Block fullscreen API (prevents video/page from expanding beyond viewport)
+    Object.defineProperty(document, 'fullscreenEnabled', {get: () => false});
+    Object.defineProperty(document, 'fullscreen',        {get: () => false});
+    document.documentElement.requestFullscreen = () => Promise.resolve();
+    Element.prototype.requestFullscreen         = () => Promise.resolve();
+    document.exitFullscreen                     = () => Promise.resolve();
+
+    // Open all links in current tab
+    document.addEventListener('click', e => {
+        const a = e.target.closest('a');
+        if (a) a.removeAttribute('target');
+    });
+"""
+
+_CHROMIUM_ARGS = ["--disable-features=FullscreenWithinTab", "--kiosk"]
+
+
+def setup_browser(
+    pw, layout_w: int, layout_h: int, proxy: str | None, profile: str | None
+) -> tuple[BrowserContext, "Page", "Callable"]:
+    """Returns (ctx, page, cleanup).
+
+    When profile is set, uses a persistent context (cookies/logins survive
+    between sessions). Otherwise uses an ephemeral context.
+    """
+    proxy_opts = {"proxy": {"server": proxy}} if proxy else {}
+
+    if profile:
+        ctx = pw.chromium.launch_persistent_context(
+            profile,
+            headless=True,
+            viewport={"width": layout_w, "height": layout_h},
+            args=_CHROMIUM_ARGS,
+            **proxy_opts,
+        )
+        ctx.add_init_script(_INIT_SCRIPT)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        return ctx, page, ctx.close
+    else:
+        browser = pw.chromium.launch(headless=True, args=_CHROMIUM_ARGS, **proxy_opts)
+        opts: dict = {"viewport": {"width": layout_w, "height": layout_h}, **proxy_opts}
+        ctx = browser.new_context(**opts)
+        ctx.add_init_script(_INIT_SCRIPT)
+        page = ctx.new_page()
+        return ctx, page, browser.close
 
 
 def set_screen_metrics(cdp: CDPSession, w: int, h: int) -> None:
@@ -239,6 +272,9 @@ def main() -> None:
     parser.add_argument("--proxy", help="Proxy server (e.g. socks5://localhost:1080)")
     parser.add_argument("--width", type=int, default=1280,
                         help="Layout width in CSS pixels (default 1280)")
+    parser.add_argument("--profile", metavar="DIR",
+                        help="Browser profile directory for persistent sessions "
+                             "(cookies/logins survive between runs)")
     args = parser.parse_args()
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
@@ -247,14 +283,8 @@ def main() -> None:
         layout_w = args.width
         zoom = Zoom()
 
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--disable-features=FullscreenWithinTab", "--kiosk"],
-            **({"proxy": {"server": args.proxy}} if args.proxy else {}),
-        )
         lh = layout_height(layout_w, pb)
-        ctx = make_context(browser, layout_w, lh, args.proxy)
-        page = ctx.new_page()
+        ctx, page, cleanup = setup_browser(pw, layout_w, lh, args.proxy, args.profile)
         cdp = ctx.new_cdp_session(page)
         set_screen_metrics(cdp, layout_w, lh)
 
@@ -380,7 +410,7 @@ def main() -> None:
         finally:
             cdp.detach()
             disable_mouse()
-            browser.close()
+            cleanup()
 
 
 if __name__ == "__main__":
