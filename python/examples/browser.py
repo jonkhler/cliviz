@@ -24,21 +24,14 @@ import cliviz
 # ── Terminal mouse tracking ──
 
 def enable_mouse() -> None:
-    # Click + scroll tracking only (SGR mode). Motion tracking enabled on demand.
-    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1006h")
+    # Click + scroll + all-motion tracking (SGR mode)
+    sys.stdout.buffer.write(b"\x1b[?1000h\x1b[?1003h\x1b[?1006h")
     sys.stdout.buffer.flush()
 
 def disable_mouse() -> None:
     sys.stdout.buffer.write(b"\x1b[?1000l\x1b[?1003l\x1b[?1006l")
     sys.stdout.buffer.flush()
 
-def enable_motion() -> None:
-    sys.stdout.buffer.write(b"\x1b[?1003h")
-    sys.stdout.buffer.flush()
-
-def disable_motion() -> None:
-    sys.stdout.buffer.write(b"\x1b[?1003l")
-    sys.stdout.buffer.flush()
 
 
 # ── Input parsing ──
@@ -53,7 +46,7 @@ def read_input(fd: int) -> list:
     events: list = []
     buf = b""
     while select.select([fd], [], [], 0)[0]:
-        chunk = os.read(fd, 256)
+        chunk = os.read(fd, 4096)  # large enough to drain motion event floods
         if not chunk:
             break
         buf += chunk
@@ -96,6 +89,14 @@ def read_input(fd: int) -> list:
             events.append(("key", chr(b)))
             i += 1
     return events
+
+
+# ── URL bar state ──
+
+@dataclass
+class UrlBar:
+    active: bool = False
+    text: str = ""
 
 
 # ── Zoom state ──
@@ -289,6 +290,7 @@ def main() -> None:
         cdp = ctx.new_cdp_session(page) if not args.no_cdp else None
         if cdp:
             set_screen_metrics(cdp, layout_w, lh)
+        url_bar = UrlBar()
 
         # Use a flag — never call Playwright API inside event callbacks
         navigation_pending = [False]
@@ -321,23 +323,46 @@ def main() -> None:
 
                     def exit_zoom() -> None:
                         nonlocal zoom
-                        disable_motion()  # stop motion events when not selecting
                         zoom = Zoom()
 
                     if etype == "key":
                         ch = event[1]
+
+                        # URL bar mode — absorb all keys except Enter/Esc
+                        if url_bar.active:
+                            if ch == "\r":
+                                url = url_bar.text.strip()
+                                url_bar.active = False
+                                url_bar.text = ""
+                                if url:
+                                    if "://" not in url:
+                                        url = "https://" + url
+                                    page.goto(url, wait_until="domcontentloaded")
+                            elif ch in ("\x1b", "\x11"):  # ESC or Ctrl-Q cancel
+                                url_bar.active = False
+                                url_bar.text = ""
+                                if ch == "\x11":
+                                    return
+                            elif ch == "\x7f":
+                                url_bar.text = url_bar.text[:-1]
+                            elif ch >= " ":
+                                url_bar.text += ch
+                            continue  # don't process further
+
                         if ch == "\x11":  # Ctrl-Q
                             return
-                        elif ch == "\x1a":  # Ctrl-Z → toggle zoom select / exit
+                        elif ch == "\x0c":  # Ctrl-L → open URL bar
+                            url_bar.active = True
+                            url_bar.text = page.url
+                            exit_zoom()
+                        elif ch == "\x1a":  # Ctrl-Z → toggle zoom
                             if zoom.mode == ZoomMode.NONE:
                                 zoom = Zoom(mode=ZoomMode.SELECTING)
-                                enable_motion()   # track mouse movement for drag
                             else:
                                 exit_zoom()
                         elif ch == "\x1b":  # ESC → exit zoom
                             exit_zoom()
                         elif zoom.mode != ZoomMode.SELECTING:
-                            # Forward keys in both NONE and ACTIVE zoom modes
                             if ch == "\r":
                                 page.keyboard.press("Enter")
                             elif ch == "\x7f":
@@ -345,12 +370,19 @@ def main() -> None:
                             elif ch == "\t":
                                 page.keyboard.press("Tab")
                             else:
-                                page.keyboard.type(ch, delay=30)
+                                page.keyboard.type(ch)
 
                     elif etype == "motion":
                         _, cx, cy = event
                         if zoom.mode == ZoomMode.SELECTING and zoom.drag_start:
                             zoom.drag_cur = cell_to_pixel(cx, cy)
+                        else:
+                            # Forward hover to browser for tooltips/menus
+                            bx, by = terminal_to_css(cx, cy, pb, layout_w, lh)
+                            try:
+                                page.mouse.move(bx, by)
+                            except Exception:
+                                pass
 
                     elif etype == "mouse":
                         _, btn, cx, cy, pressed = event
@@ -365,28 +397,24 @@ def main() -> None:
                                 y0 = min(zoom.drag_start[1], py)
                                 x1 = max(zoom.drag_start[0], px)
                                 y1 = max(zoom.drag_start[1], py)
-                                disable_motion()  # done dragging
                                 if x1 - x0 > 4 and y1 - y0 > 4:
-                                    # Store rect in pb pixel space — no viewport change
-                                    zoom = Zoom(
-                                        mode=ZoomMode.ACTIVE,
-                                        rect=(x0, y0, x1, y1),
-                                    )
+                                    zoom = Zoom(mode=ZoomMode.ACTIVE, rect=(x0, y0, x1, y1))
                                 else:
                                     zoom = Zoom()
 
                         elif zoom.mode == ZoomMode.ACTIVE:
-                            if pressed and btn == 0 and zoom.rect:
+                            if pressed and zoom.rect:
                                 x0, y0, x1, y1 = zoom.rect
-                                # Map terminal cell through zoom rect to full-layout CSS coords
                                 bx = (cx - 1) / pb.width  * (x1 - x0) / pb.width  * layout_w + x0 / pb.width  * layout_w
                                 by = (cy - 1) * 2 / pb.height * (y1 - y0) / pb.height * lh + y0 / pb.height * lh
-                                page.mouse.click(bx, by)
+                                pw_btn = "right" if btn == 2 else "left"
+                                page.mouse.click(bx, by, button=pw_btn)
 
                         else:  # NONE
-                            if pressed and btn == 0:
+                            if pressed:
                                 bx, by = terminal_to_css(cx, cy, pb, layout_w, lh)
-                                page.mouse.click(bx, by)
+                                pw_btn = "right" if btn == 2 else "left"
+                                page.mouse.click(bx, by, button=pw_btn)
 
                     elif etype == "scroll":
                         _, direction, _, _ = event
@@ -400,11 +428,16 @@ def main() -> None:
                 # present_nodiff avoids stale cells from JPEG producing same
                 # quantized color as the previous frame (causes torn-frame artifacts)
                 pb.encode_all()
-                mode_hint = "  [Ctrl-Z]zoom-select " if zoom.mode == ZoomMode.SELECTING else \
-                            "  [Ctrl-Z]exit-zoom " if zoom.mode == ZoomMode.ACTIVE else ""
-                pb.draw_text(1, 0,
-                             f" {pacer.fps:.0f}fps  {page.url[:50]}  {mode_hint}Ctrl-Q=quit ",
-                             255, 255, 255, 30, 30, 50)
+                if url_bar.active:
+                    # URL input bar — full width, clearly distinct
+                    bar = f" Go: {url_bar.text}_"
+                    pb.draw_text(1, 0, bar.ljust(pb.width - 1), 255, 255, 200, 20, 60, 20)
+                else:
+                    mode_hint = "  [Ctrl-Z]zoom-select " if zoom.mode == ZoomMode.SELECTING else \
+                                "  [Ctrl-Z]exit-zoom " if zoom.mode == ZoomMode.ACTIVE else ""
+                    pb.draw_text(1, 0,
+                                 f" {pacer.fps:.0f}fps  {page.url[:50]}  {mode_hint}Ctrl-L=url  Ctrl-Q=quit ",
+                                 255, 255, 255, 30, 30, 50)
                 # Terminal title: resolution info for debugging
                 vp = page.viewport_size
                 sys.stdout.buffer.write(
