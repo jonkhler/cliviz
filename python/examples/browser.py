@@ -11,8 +11,10 @@ import os
 import select
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Literal, NamedTuple
+from urllib.parse import urlparse
 
 import numpy as np
 from PIL import Image
@@ -36,14 +38,33 @@ def disable_mouse() -> None:
 
 # ── Input parsing ──
 
-def read_input(fd: int) -> list:
-    """Return list of events:
-      ('key', ch)
-      ('mouse', btn, cx, cy, pressed)
-      ('motion', cx, cy)
-      ('scroll', dir, cx, cy)
-    """
-    events: list = []
+class KeyEvent(NamedTuple):
+    ch: str
+
+
+class MouseEvent(NamedTuple):
+    button: int
+    x: int
+    y: int
+    pressed: bool
+
+
+class MotionEvent(NamedTuple):
+    x: int
+    y: int
+
+
+class ScrollEvent(NamedTuple):
+    direction: Literal["up", "down"]
+    x: int
+    y: int
+
+
+Event = KeyEvent | MouseEvent | MotionEvent | ScrollEvent
+
+
+def read_input(fd: int) -> list[Event]:
+    events: list[Event] = []
     buf = b""
     while select.select([fd], [], [], 0)[0]:
         chunk = os.read(fd, 4096)  # large enough to drain motion event floods
@@ -69,16 +90,16 @@ def read_input(fd: int) -> list:
                 button = cb & 0x03
                 is_motion = bool(cb & 32)
                 if cb & 64:
-                    events.append(("scroll", "up" if button == 0 else "down", cx, cy))
+                    events.append(ScrollEvent("up" if button == 0 else "down", cx, cy))
                 elif is_motion:
-                    events.append(("motion", cx, cy))
+                    events.append(MotionEvent(cx, cy))
                 else:
-                    events.append(("mouse", button, cx, cy, not is_release))
+                    events.append(MouseEvent(button, cx, cy, not is_release))
             i = end + 1
         elif b == 0x1B:
             # Check for bare ESC (Ctrl-Esc) — no sequence follows quickly
             if i + 1 < len(buf) and buf[i+1] not in (ord("["), ord("O")):
-                events.append(("key", "\x1b"))
+                events.append(KeyEvent("\x1b"))
                 i += 1
             else:
                 i += 1
@@ -86,7 +107,7 @@ def read_input(fd: int) -> list:
                     i += 1
                 i += 1
         else:
-            events.append(("key", chr(b)))
+            events.append(KeyEvent(chr(b)))
             i += 1
     return events
 
@@ -113,6 +134,13 @@ class Zoom:
     drag_start: tuple[int, int] | None = None  # pb pixel coords
     drag_cur:   tuple[int, int] | None = None  # pb pixel coords
     rect: tuple[int, int, int, int] | None = None  # (x0,y0,x1,y1) pb pixels
+
+
+@dataclass
+class BrowserState:
+    url_bar: UrlBar = field(default_factory=UrlBar)
+    zoom: Zoom = field(default_factory=Zoom)
+    navigation_pending: bool = False
 
 
 def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
@@ -211,7 +239,8 @@ def take_screenshot(page: Page) -> np.ndarray | None:
             clip={"x": 0, "y": 0, "width": vp["width"], "height": vp["height"]},
         )
         return np.array(Image.open(io.BytesIO(jpg)).convert("RGB"), dtype=np.uint8)
-    except Exception:
+    except Exception as exc:
+        print(f"screenshot error: {exc}", file=sys.stderr)
         return None
 
 
@@ -262,6 +291,39 @@ def render_frame(pb: cliviz.PixelBuffer, native: np.ndarray, zoom: Zoom) -> None
             ).astype(np.uint8)
 
 
+def safe_url(url: str, show_full: bool = False) -> str:
+    if show_full:
+        return url
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return url
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    except Exception:
+        return url
+
+
+def render_hud(
+    pb: cliviz.PixelBuffer,
+    state: BrowserState,
+    url: str,
+    fps: float,
+    show_full_url: bool,
+) -> None:
+    if state.url_bar.active:
+        bar = f" Go: {state.url_bar.text}_"
+        pb.draw_text(1, 0, bar.ljust(pb.width - 1), 255, 255, 200, 20, 60, 20)
+    else:
+        mode_hint = "  [Ctrl-Z]zoom-select " if state.zoom.mode == ZoomMode.SELECTING else \
+                    "  [Ctrl-Z]exit-zoom " if state.zoom.mode == ZoomMode.ACTIVE else ""
+        pb.draw_text(
+            1, 0,
+            f" {fps:.0f}fps  {safe_url(url, show_full=show_full_url)[:50]}  "
+            f"{mode_hint}Ctrl-L=url  Ctrl-Q=quit ",
+            255, 255, 255, 30, 30, 50,
+        )
+
+
 # ── Main ──
 
 def main() -> None:
@@ -277,25 +339,25 @@ def main() -> None:
     parser.add_argument("--no-cdp", action="store_true",
                         help="Disable CDP session (better login compatibility, "
                              "disables fullscreen video fix)")
+    parser.add_argument("--show-full-url", action="store_true",
+                        help="Show full URLs in HUD and terminal title")
     args = parser.parse_args()
 
     with cliviz.Terminal() as term, sync_playwright() as pw:
         pb = cliviz.PixelBuffer(term.cols, term.rows)
         pacer = cliviz.FramePacer(target_fps=30)
         layout_w = args.width
-        zoom = Zoom()
+        state = BrowserState()
 
         lh = layout_height(layout_w, pb)
         ctx, page, cleanup = setup_browser(pw, layout_w, lh, args.proxy, args.profile)
         cdp = ctx.new_cdp_session(page) if not args.no_cdp else None
         if cdp:
             set_screen_metrics(cdp, layout_w, lh)
-        url_bar = UrlBar()
+        def _on_navigated(_: object) -> None:
+            state.navigation_pending = True
 
-        # Use a flag — never call Playwright API inside event callbacks
-        navigation_pending = [False]
-        page.on("framenavigated", lambda _: navigation_pending.__setitem__(0, True))
-
+        page.on("framenavigated", _on_navigated)
 
         page.goto(args.url, wait_until="domcontentloaded")
         enable_mouse()
@@ -305,9 +367,9 @@ def main() -> None:
                 pacer.pace()
 
                 # Exit zoom on navigation (deferred from callback)
-                if navigation_pending[0]:
-                    navigation_pending[0] = False
-                    zoom = Zoom()
+                if state.navigation_pending:
+                    state.navigation_pending = False
+                    state.zoom = Zoom()
 
                 if term.was_resized():
                     pb = cliviz.PixelBuffer(term.cols, term.rows)
@@ -315,54 +377,51 @@ def main() -> None:
                     page.set_viewport_size({"width": layout_w, "height": lh})
                     if cdp:
                         set_screen_metrics(cdp, layout_w, lh)
-                    zoom = Zoom()
+                    state.zoom = Zoom()
 
 
                 for event in read_input(sys.stdin.fileno()):
-                    etype = event[0]
-
                     def exit_zoom() -> None:
-                        nonlocal zoom
-                        zoom = Zoom()
+                        state.zoom = Zoom()
 
-                    if etype == "key":
-                        ch = event[1]
+                    if isinstance(event, KeyEvent):
+                        ch = event.ch
 
                         # URL bar mode — absorb all keys except Enter/Esc
-                        if url_bar.active:
+                        if state.url_bar.active:
                             if ch == "\r":
-                                url = url_bar.text.strip()
-                                url_bar.active = False
-                                url_bar.text = ""
+                                url = state.url_bar.text.strip()
+                                state.url_bar.active = False
+                                state.url_bar.text = ""
                                 if url:
                                     if "://" not in url:
                                         url = "https://" + url
                                     page.goto(url, wait_until="domcontentloaded")
                             elif ch in ("\x1b", "\x11"):  # ESC or Ctrl-Q cancel
-                                url_bar.active = False
-                                url_bar.text = ""
+                                state.url_bar.active = False
+                                state.url_bar.text = ""
                                 if ch == "\x11":
                                     return
                             elif ch == "\x7f":
-                                url_bar.text = url_bar.text[:-1]
+                                state.url_bar.text = state.url_bar.text[:-1]
                             elif ch >= " ":
-                                url_bar.text += ch
+                                state.url_bar.text += ch
                             continue  # don't process further
 
                         if ch == "\x11":  # Ctrl-Q
                             return
                         elif ch == "\x0c":  # Ctrl-L → open URL bar
-                            url_bar.active = True
-                            url_bar.text = page.url
+                            state.url_bar.active = True
+                            state.url_bar.text = page.url
                             exit_zoom()
                         elif ch == "\x1a":  # Ctrl-Z → toggle zoom
-                            if zoom.mode == ZoomMode.NONE:
-                                zoom = Zoom(mode=ZoomMode.SELECTING)
+                            if state.zoom.mode == ZoomMode.NONE:
+                                state.zoom = Zoom(mode=ZoomMode.SELECTING)
                             else:
                                 exit_zoom()
                         elif ch == "\x1b":  # ESC → exit zoom
                             exit_zoom()
-                        elif zoom.mode != ZoomMode.SELECTING:
+                        elif state.zoom.mode != ZoomMode.SELECTING:
                             if ch == "\r":
                                 page.keyboard.press("Enter")
                             elif ch == "\x7f":
@@ -372,78 +431,67 @@ def main() -> None:
                             else:
                                 page.keyboard.type(ch)
 
-                    elif etype == "motion":
-                        _, cx, cy = event
-                        if zoom.mode == ZoomMode.SELECTING and zoom.drag_start:
-                            zoom.drag_cur = cell_to_pixel(cx, cy)
+                    elif isinstance(event, MotionEvent):
+                        if state.zoom.mode == ZoomMode.SELECTING and state.zoom.drag_start:
+                            state.zoom.drag_cur = cell_to_pixel(event.x, event.y)
                         else:
                             # Forward hover to browser for tooltips/menus
-                            bx, by = terminal_to_css(cx, cy, pb, layout_w, lh)
+                            bx, by = terminal_to_css(event.x, event.y, pb, layout_w, lh)
                             try:
                                 page.mouse.move(bx, by)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                print(f"hover error: {exc}", file=sys.stderr)
 
-                    elif etype == "mouse":
-                        _, btn, cx, cy, pressed = event
-                        px, py = cell_to_pixel(cx, cy)
+                    elif isinstance(event, MouseEvent):
+                        px, py = cell_to_pixel(event.x, event.y)
 
-                        if zoom.mode == ZoomMode.SELECTING:
-                            if pressed and btn == 0:
-                                zoom.drag_start = (px, py)
-                                zoom.drag_cur   = (px, py)
-                            elif not pressed and btn == 0 and zoom.drag_start:
-                                x0 = min(zoom.drag_start[0], px)
-                                y0 = min(zoom.drag_start[1], py)
-                                x1 = max(zoom.drag_start[0], px)
-                                y1 = max(zoom.drag_start[1], py)
+                        if state.zoom.mode == ZoomMode.SELECTING:
+                            if event.pressed and event.button == 0:
+                                state.zoom.drag_start = (px, py)
+                                state.zoom.drag_cur   = (px, py)
+                            elif not event.pressed and event.button == 0 and state.zoom.drag_start:
+                                x0 = min(state.zoom.drag_start[0], px)
+                                y0 = min(state.zoom.drag_start[1], py)
+                                x1 = max(state.zoom.drag_start[0], px)
+                                y1 = max(state.zoom.drag_start[1], py)
                                 if x1 - x0 > 4 and y1 - y0 > 4:
-                                    zoom = Zoom(mode=ZoomMode.ACTIVE, rect=(x0, y0, x1, y1))
+                                    state.zoom = Zoom(mode=ZoomMode.ACTIVE, rect=(x0, y0, x1, y1))
                                 else:
-                                    zoom = Zoom()
+                                    state.zoom = Zoom()
 
-                        elif zoom.mode == ZoomMode.ACTIVE:
-                            if pressed and zoom.rect:
-                                x0, y0, x1, y1 = zoom.rect
-                                bx = (cx - 1) / pb.width  * (x1 - x0) / pb.width  * layout_w + x0 / pb.width  * layout_w
-                                by = (cy - 1) * 2 / pb.height * (y1 - y0) / pb.height * lh + y0 / pb.height * lh
-                                pw_btn = "right" if btn == 2 else "left"
+                        elif state.zoom.mode == ZoomMode.ACTIVE:
+                            if event.pressed and state.zoom.rect:
+                                x0, y0, x1, y1 = state.zoom.rect
+                                bx = (event.x - 1) / pb.width  * (x1 - x0) / pb.width  * layout_w + x0 / pb.width  * layout_w
+                                by = (event.y - 1) * 2 / pb.height * (y1 - y0) / pb.height * lh + y0 / pb.height * lh
+                                pw_btn = "right" if event.button == 2 else "left"
                                 page.mouse.click(bx, by, button=pw_btn)
 
                         else:  # NONE
-                            if pressed:
-                                bx, by = terminal_to_css(cx, cy, pb, layout_w, lh)
-                                pw_btn = "right" if btn == 2 else "left"
+                            if event.pressed:
+                                bx, by = terminal_to_css(event.x, event.y, pb, layout_w, lh)
+                                pw_btn = "right" if event.button == 2 else "left"
                                 page.mouse.click(bx, by, button=pw_btn)
 
-                    elif etype == "scroll":
-                        _, direction, _, _ = event
-                        page.mouse.wheel(0, -60 if direction == "up" else 60)
+                    elif isinstance(event, ScrollEvent):
+                        page.mouse.wheel(0, -60 if event.direction == "up" else 60)
 
                 frame = take_screenshot(page)
                 if frame is not None:
-                    render_frame(pb, frame, zoom)
+                    render_frame(pb, frame, state.zoom)
 
                 # encode → text overlay → nodiff present
                 # present_nodiff avoids stale cells from JPEG producing same
                 # quantized color as the previous frame (causes torn-frame artifacts)
                 pb.encode_all()
-                if url_bar.active:
-                    # URL input bar — full width, clearly distinct
-                    bar = f" Go: {url_bar.text}_"
-                    pb.draw_text(1, 0, bar.ljust(pb.width - 1), 255, 255, 200, 20, 60, 20)
-                else:
-                    mode_hint = "  [Ctrl-Z]zoom-select " if zoom.mode == ZoomMode.SELECTING else \
-                                "  [Ctrl-Z]exit-zoom " if zoom.mode == ZoomMode.ACTIVE else ""
-                    pb.draw_text(1, 0,
-                                 f" {pacer.fps:.0f}fps  {page.url[:50]}  {mode_hint}Ctrl-L=url  Ctrl-Q=quit ",
-                                 255, 255, 255, 30, 30, 50)
+                render_hud(pb, state, page.url, pacer.fps, args.show_full_url)
                 # Terminal title: resolution info for debugging
                 vp = page.viewport_size
+                title_url = safe_url(page.url, show_full=args.show_full_url)
                 sys.stdout.buffer.write(
                     f"\x1b]0;cliviz {pb.width}×{pb.height}px "
                     f"| browser {vp['width']}×{vp['height']}css "
-                    f"| {pacer.fps:.0f}fps\x07".encode()
+                    f"| {pacer.fps:.0f}fps | {title_url}\x07".encode()
                 )
                 sys.stdout.buffer.flush()
                 pb.present(color_threshold=8)
