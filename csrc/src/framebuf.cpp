@@ -89,7 +89,13 @@ uint32_t Framebuffer::flush(OutputBuffer& buf, uint8_t color_threshold) {
                         break;
                     }
                 }
-                if (small_change) continue;
+                if (small_change) {
+                    // Acknowledge the skipped value so front converges to back.
+                    // Without this, front stays stale and the cell re-emits
+                    // on every subsequent dirty cycle even with no further change.
+                    front[idx] = back[idx];
+                    continue;
+                }
             }
 
             uint32_t row = idx / width;

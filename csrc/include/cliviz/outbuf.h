@@ -59,8 +59,12 @@ struct OutputBuffer {
     // Default capacity for non-terminal uses (C++ demos, tests).
     static constexpr uint32_t DEFAULT_CAPACITY = 1u << 20; // 1MB
 
-    // Worst-case bytes per cell: cursor(12) + fg(19) + bg(19) + char(3) = 53
-    static constexpr uint32_t BYTES_PER_CELL = 53u;
+    // Worst-case bytes per cell:
+    //   cursor ESC[65535;65535H = 14 bytes (not 12: 5-digit row + 5-digit col)
+    //   fg truecolor ESC[38;2;255;255;255m = 19 bytes
+    //   bg truecolor ESC[48;2;255;255;255m = 19 bytes
+    //   char ▀ (UTF-8) = 3 bytes → total 55; rounded up to 56 for alignment.
+    static constexpr uint32_t BYTES_PER_CELL = 56u;
 
     // Compute capacity needed for a given cell count.
     static constexpr uint32_t capacity_for_cells(uint32_t cell_count) {
@@ -92,6 +96,13 @@ struct OutputBuffer {
     void clear() { len = 0; }
 
     void append(const char* s, uint32_t n) {
+        if (n > capacity) {
+            // Chunk is larger than the entire buffer: flush what we have,
+            // then write the oversized chunk directly to stdout.
+            flush();
+            ::write(STDOUT_FILENO, s, n);
+            return;
+        }
         if (len + n > capacity) flush();
         std::memcpy(data + len, s, n);
         len += n;
@@ -103,6 +114,7 @@ struct OutputBuffer {
     }
 
     void append_uint8(uint8_t v) {
+        if (remaining() < 3) flush();
         const auto& e = digit_table.entries[v];
         std::memcpy(data + len, e.chars, e.len);
         len += e.len;
@@ -113,6 +125,7 @@ struct OutputBuffer {
             append_uint8(static_cast<uint8_t>(v));
             return;
         }
+        if (remaining() < 5) flush();
         char tmp[5];
         int i = 0;
         uint16_t rem = v;

@@ -203,6 +203,36 @@ TEST(Framebuffer, PerceptualSkipEmitsLargeChanges) {
     EXPECT_EQ(emitted, 1u);
 }
 
+// ── color_threshold state convergence ──
+
+// Regression: when a cell is skipped due to color_threshold, front must be
+// synced to back so that the cell does not emit on a second flush with exact
+// comparison (threshold=0). Without the fix, front stays stale and the cell
+// would spuriously re-emit whenever it is dirtied again.
+TEST(Framebuffer, ColorThreshold_SkippedCell_ConvergesToBack) {
+    auto fb = Framebuffer::create(4, 2);
+
+    // Initial emit: front becomes (100,100,100)
+    Cell c1{{100, 100, 100}, {50, 50, 50}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c1);
+    OutputBuffer buf;
+    fb->flush(buf, 0);
+    EXPECT_EQ(fb->front[0], c1);
+
+    // Small delta (2 < threshold 4): skip, but front must be synced to back
+    Cell c2{{102, 102, 102}, {52, 52, 52}, GLYPH_HALF_UPPER};
+    fb->set(0, 0, c2);
+    buf.clear();
+    EXPECT_EQ(fb->flush(buf, 4), 0u); // skipped
+
+    // Re-dirty with the same skipped value and flush with threshold=0.
+    // With fix: front==back → nothing to emit.
+    // Without fix: front=(100,100,100), back=(102,102,102) → emits 1 spuriously.
+    fb->set(0, 0, c2);
+    buf.clear();
+    EXPECT_EQ(fb->flush(buf, 0), 0u);
+}
+
 TEST(Framebuffer, PerceptualSkipAlwaysEmitsGlyphChange) {
     auto fb = Framebuffer::create(4, 2);
     Cell c1{{100, 100, 100}, {50, 50, 50}, GLYPH_HALF_UPPER};

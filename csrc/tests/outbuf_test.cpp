@@ -168,16 +168,62 @@ TEST(OutputBuffer, DynamicCapacity) {
 
 TEST(OutputBuffer, CapacityForCells) {
     uint32_t cap = OutputBuffer::capacity_for_cells(100);
-    // 100 cells × 53 bytes + 16 sync bytes
-    EXPECT_EQ(cap, 100u * 53u + 16u);
+    // 100 cells × BYTES_PER_CELL + 16 sync bytes
+    EXPECT_EQ(cap, 100u * OutputBuffer::BYTES_PER_CELL + 16u);
 }
 
 TEST(OutputBuffer, CapacityForCellsLargeTerminal) {
     // 518 cols × 160 rows = 82,880 cells — fits without overflow
     uint32_t cells = 518u * 160u;
     uint32_t cap = OutputBuffer::capacity_for_cells(cells);
-    EXPECT_EQ(cap, cells * 53u + 16u);
+    EXPECT_EQ(cap, cells * OutputBuffer::BYTES_PER_CELL + 16u);
     EXPECT_GT(cap, 4u * 1024u * 1024u); // > 4MB
+}
+
+// ── BYTES_PER_CELL worst-case sizing ──
+
+// Worst-case cell: cursor ESC[65535;65535H (14) + fg truecolor (19) + bg (19) + ▀ UTF-8 (3) = 55.
+// BYTES_PER_CELL must be at least 55 to prevent heap overruns.
+TEST(OutputBuffer, BytesPerCell_IsAdequateForWorstCase) {
+    // cursor: ESC[65535;65535H = 2+5+1+5+1 = 14 bytes
+    // fg:     ESC[38;2;255;255;255m = 19 bytes
+    // bg:     ESC[48;2;255;255;255m = 19 bytes
+    // char:   ▀ (U+2580) = 3 bytes
+    constexpr uint32_t worst_case = 14u + 19u + 19u + 3u; // 55
+    EXPECT_GE(OutputBuffer::BYTES_PER_CELL, worst_case);
+}
+
+// ── append_uint8 / append_uint16 capacity safety ──
+
+TEST(OutputBuffer, AppendUint8_NearCapacity_Flushes) {
+    // Buffer with only 2 bytes remaining: append_uint8(255) needs 3 → must flush first
+    OutputBuffer buf(8);
+    buf.append("AAAAAA", 6); // 6/8 used, 2 remaining
+    buf.append_uint8(255);   // needs 3 bytes — would overrun without flush
+    // After flush (6 bytes written to stdout), then 3 bytes appended
+    EXPECT_EQ(buf.size(), 3u);
+    EXPECT_EQ(buf.view(), "255");
+}
+
+TEST(OutputBuffer, AppendUint16_Above255_NearCapacity_Flushes) {
+    // Buffer with only 4 bytes remaining: append_uint16(65535) needs 5 → must flush first
+    OutputBuffer buf(10);
+    buf.append("AAAAAA", 6); // 6/10 used, 4 remaining
+    buf.append_uint16(65535); // needs 5 bytes — would overrun without flush
+    EXPECT_EQ(buf.size(), 5u);
+    EXPECT_EQ(buf.view(), "65535");
+}
+
+// ── append(s, n) with n > capacity ──
+
+TEST(OutputBuffer, Append_NLargerThanCapacity_DoesNotOverrun) {
+    // If a single append chunk exceeds the buffer capacity, it must not heap-overrun.
+    // The implementation writes oversized chunks directly to stdout and leaves buf empty.
+    OutputBuffer buf(4);
+    const char big[] = "0123456789"; // 10 bytes > capacity 4
+    buf.append(big, 10);
+    // Buffer should be empty: oversized data was flushed directly
+    EXPECT_EQ(buf.size(), 0u);
 }
 
 TEST(OutputBuffer, AutoFlushAtDynamicCapacity) {
