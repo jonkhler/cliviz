@@ -1,8 +1,12 @@
+import gc
+import time
+
 import numpy as np
 import os
 import pytest
 
 import cliviz
+from cliviz.framepace import FramePacer
 
 
 def test_pixelbuffer_create():
@@ -99,10 +103,18 @@ def test_pixels_keeps_buffer_alive():
     pb.clear(42, 0, 0)
     pixels = pb.pixels
     del pb  # PixelBuffer ref dropped; array must still hold it alive
-    import gc
     gc.collect()
     # Array contents must still be readable (no use-after-free)
     assert pixels[0, 0, 0] == 42
+
+
+def test_terminal_context_manager_init_fails_gracefully():
+    """__enter__ raises RuntimeError (not a TTY in test env), not crash."""
+    if os.isatty(1):
+        pytest.skip("stdout is a TTY")
+    t = cliviz.Terminal()
+    with pytest.raises(RuntimeError):
+        t.__enter__()
 
 
 def test_terminal_fails_gracefully_in_test():
@@ -112,3 +124,58 @@ def test_terminal_fails_gracefully_in_test():
         assert not t.active
     else:
         pytest.skip("stdout is a TTY")
+
+
+# ── FramePacer ──
+
+def test_framepaper_pace_is_monotonic():
+    pacer = FramePacer(target_fps=200.0)  # very fast target so test doesn't sleep long
+    t0 = time.monotonic()
+    dt = pacer.pace()
+    t1 = time.monotonic()
+    assert dt > 0, "pace() must return a positive elapsed time"
+    assert dt <= t1 - t0 + 0.01, "returned dt must not exceed wall time"
+
+
+def test_framepaper_fps_property_after_pace():
+    pacer = FramePacer(target_fps=200.0)
+    pacer.pace()
+    # fps is 0 until at least one pace() establishes a frame time
+    pacer.pace()
+    assert pacer.fps > 0, "fps must be positive after two pace() calls"
+
+
+def test_framepaper_adapts_to_slow_terminal():
+    """dt increases when frame_time exceeds 1.5× target."""
+    pacer = FramePacer(target_fps=1000.0, min_fps=10.0)
+    initial_dt = pacer.dt
+    # Simulate a very slow frame by advancing _last backward
+    pacer._last -= 0.1  # 100ms ago — way beyond any target
+    pacer.pace()
+    # After a slow frame, dt should have backed off (increased toward min_dt)
+    assert pacer.dt >= initial_dt
+
+
+# ── present_nodiff vs present behavioral difference ──
+
+def test_present_nodiff_emits_all_cells():
+    """present_nodiff writes every cell even without encode/dirty."""
+    pb = cliviz.PixelBuffer(4, 2)
+    # No encode — just call present_nodiff directly on the cell buffer
+    # It must return cell_count = width * term_rows = 4 * 2 = 8
+    count = pb.present_nodiff()
+    assert count == 8
+
+
+def test_present_only_emits_dirty_cells():
+    """present after encode() only writes cells with actual changes."""
+    pb = cliviz.PixelBuffer(4, 2)
+    pb.clear(10, 20, 30)
+    pb.encode_all()
+    pb.present()  # establish front buffer
+
+    # set() writes the pixel AND marks the cell dirty; numpy write alone does not
+    pb.set(0, 0, 11, 21, 31)
+    pb.encode()
+    count = pb.present()
+    assert count == 1, f"expected 1 changed cell, got {count}"

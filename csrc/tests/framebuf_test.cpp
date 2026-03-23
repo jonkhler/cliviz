@@ -250,7 +250,38 @@ TEST(Framebuffer, PerceptualSkipAlwaysEmitsGlyphChange) {
     EXPECT_EQ(emitted, 1u);
 }
 
-// Cursor position is now always emitted for portability (some terminals
+// ── flush_nodiff edge cases ──
+
+TEST(Framebuffer, FlushNodiff_1x1) {
+    auto fb = Framebuffer::create(1, 1);
+    Cell c{{255, 128, 0}, {0, 0, 255}, GLYPH_HALF_UPPER};
+    fb->back[0] = c;
+
+    OutputBuffer buf;
+    uint32_t emitted = fb->flush_nodiff(buf);
+
+    EXPECT_EQ(emitted, 1u);
+    EXPECT_GT(buf.size(), 0u);
+    // Front should now match back
+    EXPECT_EQ(fb->front[0], c);
+}
+
+TEST(Framebuffer, FlushNodiff_MaxCoords) {
+    // Largest allowed 16-bit terminal: 65535×65535 would OOM; use 999×999 instead
+    // (verifies cursor escape for > 255 row/col without heap overrun)
+    auto fb = Framebuffer::create(300, 300);
+    Cell c{{200, 100, 50}, {50, 100, 200}, GLYPH_HALF_UPPER};
+    fb->back[fb->cell_count - 1] = c;
+
+    OutputBuffer buf;
+    fb->flush_nodiff(buf);
+
+    std::string output(buf.view());
+    // Last cell is at row 300, col 300 — both > 255, requiring multi-byte output
+    EXPECT_NE(output.find("\x1b[300;300H"), std::string::npos);
+}
+
+// ── Cursor position is now always emitted for portability (some terminals
 // treat ▀ as width 2), so we verify each cell gets its own cursor move.
 TEST(Framebuffer, EachCellGetsExplicitCursorPosition) {
     auto fb = Framebuffer::create(10, 1);

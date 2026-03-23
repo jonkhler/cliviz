@@ -19,6 +19,16 @@ git clone https://github.com/jonkhler/cliviz.git && cd cliviz
 pip install .
 ```
 
+### Build requirements (source installs only)
+
+| Tool | Minimum |
+|------|---------|
+| CMake | 3.21 |
+| C++ compiler | C++20 (clang 14+, gcc 12+) |
+| Python headers | matching your Python version |
+
+These are only needed when building from source (`pip install .`). Binary wheels require nothing beyond Python and numpy.
+
 ## Usage
 
 ```python
@@ -45,9 +55,17 @@ with cliviz.Terminal() as term:
 with cliviz.Terminal(color_mode="256") as term: ...      # Terminal.app
 with cliviz.Terminal(color_mode="truecolor") as term: ... # Ghostty/Kitty
 
+# Ctrl-C / SIGTERM: poll in main loop
+with cliviz.Terminal() as term:
+    while not term.was_interrupted():
+        ...
+
 # Pixel buffer
 pb = cliviz.PixelBuffer(cols, rows)
-pb.pixels                      # numpy (H, W, 3) uint8, zero-copy
+# pb.width  == cols
+# pb.height == rows * 2  (pixel rows; two per terminal row via ▀)
+# pb.term_rows == rows   (terminal rows, same as the 'rows' argument)
+pb.pixels                      # numpy (height, width, 3) uint8, zero-copy
 pb.set(x, y, r, g, b)
 pb.clear(r, g, b)
 pb.fill_rect(x0, y0, x1, y1, r, g, b)
@@ -64,13 +82,24 @@ pb.encode_all()                # pixels → cells
 pb.draw_text(0, 0, "60fps")   # after encode, before present
 pb.present()                   # diff + write to terminal
 
-# Adaptive frame pacing
+# Adaptive frame pacing — pace() goes after present(), not before render
 pacer = cliviz.FramePacer(target_fps=60)
 while running:
-    dt = pacer.pace()          # sleeps, adapts to terminal throughput
     # ... render ...
     pb.present()
+    dt = pacer.pace()          # sleeps for remaining frame budget; returns actual dt
 ```
+
+## Examples
+
+| Example | Command | Extra dependency |
+|---------|---------|-----------------|
+| Plasma / fire / starfield | `uv run python python/examples/plasma.py` | — |
+| SDF (CPU) | `uv run python python/examples/sdf_cpu.py` | — |
+| SDF (Taichi GPU) | `uv run python python/examples/sdf_taichi.py` | `uv pip install "cliviz[gpu]"` |
+| SDF (Warp GPU) | `uv run python python/examples/sdf_warp.py` | `uv pip install "cliviz[gpu]"` |
+| Demoscene | `uv run python python/examples/demoscene.py` | `uv pip install "cliviz[gpu]"` |
+| Browser | `uv run python python/examples/browser.py [url]` | `uv pip install "cliviz[browser]"` then `playwright install chromium` |
 
 ## Architecture
 
