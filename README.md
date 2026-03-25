@@ -100,6 +100,7 @@ while running:
 | SDF (Warp GPU) | `uv run python python/examples/sdf_warp.py` | `uv pip install "cliviz[gpu]"` |
 | Demoscene | `uv run python python/examples/demoscene.py` | `uv pip install "cliviz[gpu]"` |
 | Browser | `uv run python python/examples/browser.py [url]` | `uv pip install "cliviz[browser]"` then `playwright install chromium` |
+| Qt app | `uv run python python/examples/qt_app.py --app module:ClassName` | `uv pip install "cliviz[qt]"` |
 
 ## Architecture
 
