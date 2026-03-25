@@ -141,6 +141,7 @@ class BrowserState:
     url_bar: UrlBar = field(default_factory=UrlBar)
     zoom: Zoom = field(default_factory=Zoom)
     navigation_pending: bool = False
+    show_help: bool = False
 
 
 def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
@@ -303,6 +304,11 @@ def safe_url(url: str, show_full: bool = False) -> str:
         return url
 
 
+_HELP_TEXT = (
+    "  Ctrl-L: url  Ctrl-Z: zoom (drag to select, again to exit)"
+    "  scroll/click/type: forwarded  Ctrl-Q: quit  ?: hide help"
+)
+
 def render_hud(
     pb: cliviz.PixelBuffer,
     state: BrowserState,
@@ -319,8 +325,14 @@ def render_hud(
         pb.draw_text(
             1, 0,
             f" {fps:.0f}fps  {safe_url(url, show_full=show_full_url)[:50]}  "
-            f"{mode_hint}Ctrl-L=url  Ctrl-Q=quit ",
+            f"{mode_hint}Ctrl-L=url  Ctrl-Q=quit  ?=help ",
             255, 255, 255, 30, 30, 50,
+        )
+    if state.show_help:
+        pb.draw_text(
+            1, pb.term_rows - 1,
+            _HELP_TEXT.ljust(pb.width - 1),
+            220, 220, 180, 20, 40, 20,
         )
 
 
@@ -410,6 +422,8 @@ def main() -> None:
 
                         if ch == "\x11":  # Ctrl-Q
                             return
+                        elif ch == "?":
+                            state.show_help = not state.show_help
                         elif ch == "\x0c":  # Ctrl-L → open URL bar
                             state.url_bar.active = True
                             state.url_bar.text = page.url

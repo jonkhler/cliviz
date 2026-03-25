@@ -135,6 +135,7 @@ class Zoom:
 @dataclass
 class QtAppState:
     zoom: Zoom = field(default_factory=Zoom)
+    show_help: bool = False
 
 
 def cell_to_pixel(cx: int, cy: int) -> tuple[int, int]:
@@ -326,6 +327,11 @@ def forward_to_qt(
 
 # ── HUD ──
 
+_HELP_TEXT = (
+    "  Ctrl-Z: zoom (drag to select, again to exit)"
+    "  scroll/click/type: forwarded  Ctrl-Q: quit  ?: hide help"
+)
+
 def render_hud(
     pb: cliviz.PixelBuffer,
     state: QtAppState,
@@ -339,9 +345,15 @@ def render_hud(
     )
     pb.draw_text(
         1, 0,
-        f" {fps:.0f}fps  {title[:40]}  {mode_hint}Ctrl-Q=quit ",
+        f" {fps:.0f}fps  {title[:40]}  {mode_hint}Ctrl-Q=quit  ?=help ",
         255, 255, 255, 30, 30, 50,
     )
+    if state.show_help:
+        pb.draw_text(
+            1, pb.term_rows - 1,
+            _HELP_TEXT.ljust(pb.width - 1),
+            220, 220, 180, 20, 40, 20,
+        )
 
 
 # ── Main ──
@@ -395,6 +407,8 @@ def main() -> None:
                         ch = event.ch
                         if ch == "\x11":    # Ctrl-Q
                             return
+                        elif ch == "?":
+                            state.show_help = not state.show_help
                         elif ch == "\x1a":  # Ctrl-Z: toggle zoom
                             if state.zoom.mode == ZoomMode.NONE:
                                 state.zoom = Zoom(mode=ZoomMode.SELECTING)
