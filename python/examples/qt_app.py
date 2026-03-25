@@ -242,22 +242,39 @@ _CHAR_TO_KEY: dict[str, Qt.Key] = {
 }
 
 
+def _target_and_local(window: QWidget, pos: QPointF) -> tuple[QWidget, QPointF]:
+    """Find the child widget under pos and return it with pos in its local coords.
+
+    Qt does not hit-test child widgets for synthesized events — sendEvent()
+    on the top-level window delivers to the window, not to children. We must
+    find the correct child ourselves and remap the coordinates.
+    """
+    ipos = pos.toPoint()
+    child = window.childAt(ipos)
+    if child is None:
+        return window, pos
+    local = QPointF(child.mapFrom(window, ipos))
+    return child, local
+
+
 def _send_mouse(
     window: QWidget,
     event_type: QEvent.Type,
     pos: QPointF,
     button: Qt.MouseButton,
 ) -> None:
-    global_pos = window.mapToGlobal(pos.toPoint()).toPointF()
-    ev = QMouseEvent(event_type, pos, global_pos, button, button,
+    target, local = _target_and_local(window, pos)
+    global_pos = target.mapToGlobal(local.toPoint()).toPointF()
+    ev = QMouseEvent(event_type, local, global_pos, button, button,
                      Qt.KeyboardModifier.NoModifier, _device())
-    QApplication.sendEvent(window, ev)
+    QApplication.sendEvent(target, ev)
 
 
 def _send_wheel(window: QWidget, pos: QPointF, delta_y: int) -> None:
-    global_pos = window.mapToGlobal(pos.toPoint()).toPointF()
+    target, local = _target_and_local(window, pos)
+    global_pos = target.mapToGlobal(local.toPoint()).toPointF()
     ev = QWheelEvent(
-        pos, global_pos,
+        local, global_pos,
         QPoint(0, 0),           # pixelDelta (unavailable here)
         QPoint(0, delta_y),     # angleDelta: positive = up
         Qt.MouseButton.NoButton,
@@ -265,7 +282,7 @@ def _send_wheel(window: QWidget, pos: QPointF, delta_y: int) -> None:
         Qt.ScrollPhase.NoScrollPhase,
         False,
     )
-    QApplication.sendEvent(window, ev)
+    QApplication.sendEvent(target, ev)
 
 
 def forward_to_qt(
